@@ -2,6 +2,10 @@
 
 A Model Context Protocol (MCP) server that enables secure interaction with Bugzilla instances. This server facilitates communication between AI applications and Bugzilla bug tracking systems through a controlled interface.
 
+## Quick Start
+
+**Hosted Server**: Use the production server at `https://bugzilla.fastmcp.app/mcp` - no local setup required! Just add it to your MCP client configuration with your Bugzilla API key and instance URL.
+
 ## Features
 
 - Query bug information and comments
@@ -29,7 +33,7 @@ Add this to your `claude_desktop_config.json`:
 {
   "mcpServers": {
     "bugzilla": {
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "https://bugzilla.fastmcp.app/mcp",
       "headers": {
         "api_key": "your-api-key-here",
         "bugzilla_url": "https://bugzilla.example.com"
@@ -39,7 +43,7 @@ Add this to your `claude_desktop_config.json`:
 }
 ```
 
-> **Note**: Replace `http://127.0.0.1:8000/mcp` with your deployed server URL if running remotely.
+> **Note**: For local development, use `http://127.0.0.1:8000/mcp` instead.
 
 ### With Cursor IDE
 
@@ -49,7 +53,7 @@ Add this to your `.cursor/mcp.json`:
 {
   "mcpServers": {
     "bugzilla": {
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "https://bugzilla.fastmcp.app/mcp",
       "headers": {
         "api_key": "your-api-key-here",
         "bugzilla_url": "https://bugzilla.example.com"
@@ -59,7 +63,7 @@ Add this to your `.cursor/mcp.json`:
 }
 ```
 
-> **Note**: Replace `http://127.0.0.1:8000/mcp` with your deployed server URL if running remotely.
+> **Note**: For local development, use `http://127.0.0.1:8000/mcp` instead.
 
 ### With Visual Studio Code
 
@@ -70,7 +74,7 @@ Add this to your `mcp.json`:
   "servers": {
     "bugzilla": {
       "type": "http",
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "https://bugzilla.fastmcp.app/mcp",
       "headers": {
         "api_key": "your-api-key-here",
         "bugzilla_url": "https://bugzilla.example.com"
@@ -80,7 +84,7 @@ Add this to your `mcp.json`:
 }
 ```
 
-> **Note**: Replace `http://127.0.0.1:8000/mcp` with your deployed server URL if running remotely.
+> **Note**: For local development, use `http://127.0.0.1:8000/mcp` instead.
 
 ### Running the Server Locally
 
@@ -98,7 +102,7 @@ python server.py
 
 The server will start at `http://127.0.0.1:8000/mcp/`
 
-> **Note**: For production deployments, deploy the server to your preferred hosting platform (e.g., FastMCP, Railway, Fly.io, etc.) and update the URL in your MCP client configuration accordingly.
+**Production Server**: A hosted version is available at `https://bugzilla.fastmcp.app/mcp` - you can use this URL directly in your MCP client configuration without running the server locally.
 
 ## Development
 
