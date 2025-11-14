@@ -3,12 +3,14 @@
 export default defineNuxtConfig({
   modules: ["@nuxt/image"],
   routeRules: {
-    '/': { redirect: '/getting-started/introduction' }
+    '/': { redirect: { to: '/getting-started/introduction', statusCode: 301 } },
+    // Pre-render all routes for static generation on Vercel
+    '/**': { prerender: true }
   },
-  ui: {
-    colors: {
-      primary: 'blue',
-      neutral: 'zinc'
+  nitro: {
+    prerender: {
+      crawlLinks: true,
+      routes: ['/']
     }
   }
 })

@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".output/public",
+  "framework": "nuxtjs"
+}
+
