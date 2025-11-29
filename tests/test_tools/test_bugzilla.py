@@ -209,6 +209,7 @@ class TestBugsQuicksearchTool:
         """Test bugs_quicksearch raises ToolError on non-200 status"""
         mock_response = MagicMock()
         mock_response.status_code = 500
+        mock_response.json = MagicMock()  # Explicitly set as non-async to avoid warnings
         set_bugzilla_client.client.get = AsyncMock(return_value=mock_response)
         
         with pytest.raises(ToolError) as exc_info:

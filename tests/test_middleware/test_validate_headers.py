@@ -24,7 +24,7 @@ class TestValidateHeadersMiddleware:
     def mock_call_next(self):
         """Create a mock call_next function that returns an awaitable result"""
         async_result = AsyncMock(return_value="success")
-        return MagicMock(return_value=async_result())
+        return MagicMock(side_effect=lambda ctx: async_result())
 
     @pytest.fixture(autouse=True)
     def reset_global_bz(self):
@@ -147,7 +147,7 @@ class TestValidateHeadersMiddleware:
         
         expected_result = {"data": "test_data"}
         async_result = AsyncMock(return_value=expected_result)
-        mock_call_next = MagicMock(return_value=async_result())
+        mock_call_next = MagicMock(side_effect=lambda ctx: async_result())
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             result = await middleware.on_message(mock_context, mock_call_next)
@@ -169,7 +169,7 @@ class TestValidateHeadersUrlEdgeCases:
     @pytest.fixture
     def mock_call_next(self):
         async_result = AsyncMock(return_value="success")
-        return MagicMock(return_value=async_result())
+        return MagicMock(side_effect=lambda ctx: async_result())
 
     @pytest.fixture(autouse=True)
     def reset_global_bz(self):
