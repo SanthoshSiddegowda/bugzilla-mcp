@@ -1,5 +1,6 @@
 """Unit tests for the Bugzilla API client"""
 
+import json
 import pytest
 import httpx
 from bugzilla_mcp.utils import Bugzilla
@@ -247,7 +248,6 @@ class TestBugzillaAddComment:
         await bz.add_comment(12345, "My comment text", is_private=True)
 
         # Verify the request was made with correct parameters
-        import json
         request = httpx_mock.get_request()
         payload = json.loads(request.content)
         assert payload["comment"] == "My comment text"
