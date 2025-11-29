@@ -1,6 +1,9 @@
 # Bugzilla MCP Server
 
 ![Tests](https://github.com/SanthoshSiddegowda/bugzilla-mcp/actions/workflows/tests.yml/badge.svg)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)
+![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)
 
 A Model Context Protocol (MCP) server that enables secure interaction with Bugzilla instances. This server facilitates communication between AI applications and Bugzilla bug tracking systems through a controlled interface.
 
