@@ -3,7 +3,7 @@ name = "bugzilla-mcp"
 version = "0.1.0"
 description = "A Model Context Protocol (MCP) server for interacting with Bugzilla bug tracking systems"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
 keywords = ["mcp", "bugzilla", "bug-tracking", "model-context-protocol", "fastmcp"]
 classifiers = [
@@ -11,6 +11,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Software Development :: Bug Tracking",
@@ -21,3 +22,20 @@ dependencies = [
     "python-dotenv",
     "httpx",
 ]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-httpx>=0.30.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+python_classes = ["Test*"]
+addopts = "-v --tb=short"
