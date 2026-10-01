@@ -22,8 +22,10 @@ The server requires HTTP headers for authentication. Configure your MCP client w
 
 - **`api_key`** (Required) - Your Bugzilla API key
   - Get your API key from: `https://your-bugzilla-instance.com/userprefs.cgi?tab=apikey`
-- **`bugzilla_url`** (Required) - The base URL of your Bugzilla instance
+- **`bugzilla_url`** (Required) - The base URL of your Bugzilla instance (Bugzilla 5.0+)
   - Example: `https://bugzilla.test.org`
+
+> **Hosted server**: when you use `https://bugzilla.fastmcp.app/mcp`, your API key passes through that server on its way to your Bugzilla instance. If you don't want a third party to handle your key, [run the server locally](#running-the-server-locally).
 
 ## Usage
 
@@ -133,7 +135,7 @@ uv sync
 uv run python server.py
 
 # Or with standard Python
-pip install fastmcp httpx python-dotenv
+pip install .
 python server.py
 ```
 
@@ -144,19 +146,17 @@ The server will start at `http://127.0.0.1:8000/mcp/`
 ## Development
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/SanthoshSiddegowda/bugzilla-mcp.git
 cd bugzilla-mcp
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+# Install dependencies (uv creates the virtual environment)
+uv sync --all-extras
 
-# Install dependencies
-uv sync
+# Run the tests
+uv run pytest tests
 
 # Inspect the server
-fastmcp inspect server.py:mcp
+uv run fastmcp inspect server.py:mcp
 ```
 
 ## Security Considerations
@@ -170,10 +170,10 @@ fastmcp inspect server.py:mcp
 
 This MCP implementation requires Bugzilla API access to function. For security:
 
-1. **Create a dedicated Bugzilla API key** with minimal permissions
-2. **Never use administrative accounts** or full-access API keys
-3. **Restrict API key permissions** to only necessary operations
-4. **Regular security reviews** of API key usage
+1. **Use a dedicated Bugzilla account**. A Bugzilla API key has the same permissions as the account that created it, so limit the account (group membership, product access) rather than the key
+2. **Never use administrative accounts**
+3. **Be aware the server can write**: the `add_comment` tool posts comments as that account
+4. **Revoke and rotate keys** regularly from `userprefs.cgi?tab=apikey`
 
 ⚠️ **IMPORTANT**: Always follow the principle of least privilege when configuring API access.
 
