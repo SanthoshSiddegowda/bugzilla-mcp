@@ -66,10 +66,21 @@ Powerful features for bug tracking
   icon: i-lucide-message-square
   ---
   #title
-  [Manage Comments]{.text-primary}
+  [Update and File Bugs]{.text-primary}
   
   #description
-  Add public or private comments to bugs. Retrieve comment history with optional private comment access. Full comment management capabilities.
+  Change status, resolution, assignee, CC and custom fields, file new bugs, and add public or private comments. Clients confirm before changes.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-paperclip
+  ---
+  #title
+  Read [Attachments]{.text-primary}
+  
+  #description
+  Screenshots come back as images the assistant can see; logs and patches as text. Attach logs or files straight from the conversation.
   :::
 
   :::u-page-feature
