@@ -24,7 +24,7 @@ class TestBugInfoTool:
         
         assert result["id"] == 12345
         assert result["product"] == "Firefox"
-        set_bugzilla_client.bug_info.assert_called_once_with(12345)
+        set_bugzilla_client.bug_info.assert_called_once_with(12345, include_fields=None)
 
     async def test_bug_info_raises_on_missing_client(self, reset_bugzilla_client):
         """Test bug_info raises ToolError when client not initialized"""

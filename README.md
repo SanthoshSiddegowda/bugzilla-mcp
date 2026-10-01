@@ -27,12 +27,13 @@ This MCP server provides a comprehensive interface for AI agents to interact wit
 - **📊 Bulk Triage & Analytics**:
   - Parallel batch retrieval of metadata (`bugs_info`) and comments (`bugs_comments`).
   - Compress long discussion threads dynamically (`bugs_analysis_context`) to fit in standard LLM context windows.
-  - Categorize bug batches automatically (`classify_bugs_heuristics`) and generate statistical metrics (`analyze_bugs_statistics`).
+  - Categorize bug batches automatically (`classify_bugs_heuristics`) and generate statistical metrics (`analyze_bugs_statistics`). Rules use status and resolution only: closed as INVALID/WONTFIX/DUPLICATE/WORKSFORME/NOTABUG → `invalid`; NEW/ASSIGNED/REOPENED/UNCONFIRMED → `to_fix`; anything else → `review_needed`.
+  - Preview bulk changes with `update_bug(dry_run=True)`, which returns the planned changes and current values without writing.
 
 - **📎 Robust Attachment Handling**:
   - List a bug's attachments (`bug_attachments`) and read one (`get_attachment`): screenshots come back as images, logs and patches as text.
   - Attach logs, patches or files (`upload_attachment`) by passing `text` or `data_base64`, with automatic content-type detection.
-  - **Local server only** (`server_local.py`): save attachments to disk (`download_attachments`, `download_attachment`) and upload from a `file_path`. The hosted server refuses these so callers can't read or write files on the shared machine.
+  - **Local server only** (`server_local.py`): save attachments to disk (`download_attachments`, `download_attachment`) and upload from a `file_path`. The hosted server doesn't offer the download tools and refuses `file_path`, so callers can't read or write files on the shared machine.
 
 - **👤 User Management & Auditing**:
   - Audit full change histories (`bug_history`) with time and field filters.
@@ -47,6 +48,10 @@ The server requires HTTP headers for authentication. Configure your MCP client w
   - Get your API key from: `https://your-bugzilla-instance.com/userprefs.cgi?tab=apikey`
 - **`bugzilla_url`** (Required) - The base URL of your Bugzilla instance (Bugzilla 5.0+)
   - Example: `https://bugzilla.test.org`
+
+- **`read_only`** (Optional, default `true`) - The server starts in **read-only mode**: tools that change Bugzilla (`update_bug`, `create_bug`, `add_comment`, `upload_attachment`, `tag_comment`) are hidden and refused. Send `read_only: false` to enable them. For the local stdio server, set `BUGZILLA_READ_ONLY=false` instead.
+
+Self-hosting? `BUGZILLA_READ_ONLY` sets the server's default, and `BUGZILLA_DISABLED_TOOLS=update_bug,create_bug` removes individual tools entirely.
 
 > **How the key is sent**: the server forwards your key to Bugzilla in the `X-BUGZILLA-API-KEY` header. Stock Bugzilla 5.0/5.2 don't support that header, so for them it falls back to `?api_key=` (deprecated, see [Deprecations](#deprecations)).
 >

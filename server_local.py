@@ -2,7 +2,8 @@
 import os
 from dotenv import load_dotenv
 from fastmcp import FastMCP
-from bugzilla_mcp.tools.bugzilla import register_tools
+from bugzilla_mcp.middleware.read_only import ReadOnlyMode, read_only_default
+from bugzilla_mcp.tools.bugzilla import register_tools, WRITE_TOOL_NAMES
 from bugzilla_mcp.utils import Bugzilla
 import bugzilla_mcp.utils as utils
 
@@ -21,7 +22,10 @@ utils.current_bz.set(Bugzilla(url=BUGZILLA_URL, api_key=BUGZILLA_API_KEY, allow_
 
 mcp = FastMCP("Bugzilla")
 
-register_tools(mcp)
+# Read-only unless BUGZILLA_READ_ONLY=false
+mcp.add_middleware(ReadOnlyMode(WRITE_TOOL_NAMES, read_only_default(), allow_header_override=False))
+
+register_tools(mcp, local_files=True)
 
 
 if __name__ == "__main__":

@@ -126,9 +126,10 @@ class Bugzilla:
                 "pass text or data_base64 to upload_attachment."
             )
 
-    async def bug_info(self, bug_id: int) -> dict[str, Any]:
-        """get information about a given bug"""
-        return (await self._request("get", f"/bug/{bug_id}"))["bugs"][0]
+    async def bug_info(self, bug_id: int, include_fields: list[str] | None = None) -> dict[str, Any]:
+        """get information about a given bug, optionally only `include_fields`"""
+        params = {"include_fields": ",".join(include_fields)} if include_fields else None
+        return (await self._request("get", f"/bug/{bug_id}", params=params))["bugs"][0]
 
     async def bug_comments(self, bug_id: int) -> dict[str, Any]:
         """Get comments of a bug"""
@@ -382,11 +383,13 @@ class Bugzilla:
         blocks: dict[str, list[int]] | None = None,
         depends_on: dict[str, list[int]] | None = None,
         extra_fields: dict[str, Any] | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Update one or more bugs via PUT /rest/bug.
 
         Returns:
-            {"bugs": [{"id": ..., "last_change_time": ...}]}
+            {"bugs": [{"id": ..., "last_change_time": ...}]}, or with dry_run
+            {"dry_run": True, "changes": <payload>, "current": {bug_id: {field: value}}}
         """
         payload: dict[str, Any] = {"ids": ids}
         _set_if_given(
@@ -416,6 +419,18 @@ class Bugzilla:
         )
         if extra_fields is not None:
             payload.update(extra_fields)
+
+        if dry_run:
+            # Show the current value of every field the update would touch
+            fields = [k for k in payload if k not in ("ids", "comment")]
+            params = {"id": ",".join(map(str, ids)), "include_fields": ",".join(["id", *fields])}
+            bugs = (await self._request("get", "/bug", params=params)).get("bugs", [])
+            return {
+                "dry_run": True,
+                "changes": {k: v for k, v in payload.items() if k != "ids"},
+                "current": {str(b["id"]): {k: b.get(k) for k in fields} for b in bugs},
+                "not_found": sorted(set(ids) - {b["id"] for b in bugs}),
+            }
 
         # Bugzilla REST takes one id in the URL; `ids` in the body updates them all
         return await self._request("put", f"/bug/{ids[0]}", json=payload, what="update bug")

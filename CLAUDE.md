@@ -184,7 +184,7 @@ When adding a new MCP tool, follow these steps in order:
 
 1. **Utility client** (`bugzilla_mcp/utils/bugzilla.py`): Add the `async` method to the `Bugzilla` class. Call the API through `self._request(...)`; don't build auth or status checks by hand.
 2. **Tool wrapper** (`bugzilla_mcp/tools/bugzilla.py`): Add the `async` function. Get the client with `bz = _client()` and wrap failures in `ToolError`.
-3. **Registration**: Add the function to `READ_ONLY_TOOLS`, `ADDITIVE_TOOLS` or `DESTRUCTIVE_TOOLS`. `register_tools()` is shared by `server.py` and `server_local.py`.
+3. **Registration**: Add the function to `READ_ONLY_TOOLS`, `ADDITIVE_TOOLS`, `DESTRUCTIVE_TOOLS` or (if it touches the server's disk) `LOCAL_ONLY_TOOLS`. Anything outside `READ_ONLY_TOOLS` is a write tool: `ReadOnlyMode` hides it until writes are enabled (`read_only: false` header or `BUGZILLA_READ_ONLY=false`). `register_tools()` is shared by `server.py` and `server_local.py`; local-only tools are only registered by the latter.
 4. **Package export** (`bugzilla_mcp/__init__.py`): Add to both the import block and `__all__`.
 5. **Mock** (`tests/conftest.py`): Add `client.your_method = AsyncMock(...)` to `mock_bugzilla_client`.
 6. **Tests** (`tests/test_utils/`, `tests/test_tools/`): Write unit tests for both the utility client and the tool wrapper.
