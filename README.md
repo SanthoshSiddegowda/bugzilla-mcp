@@ -27,23 +27,58 @@ The server requires HTTP headers for authentication. Configure your MCP client w
 
 ## Usage
 
-### With Claude Desktop
+### With Claude Code
 
-Add this to your `claude_desktop_config.json`:
+```bash
+claude mcp add --transport http bugzilla https://bugzilla.fastmcp.app/mcp \
+  --scope user \
+  --header "api_key: your-api-key-here" \
+  --header "bugzilla_url: https://bugzilla.example.com"
+```
+
+`--scope user` makes the server available in all projects and keeps your key out of the repo. Verify with `claude mcp list`, then start a new session.
+
+To share the config with a team via a project `.mcp.json`, reference environment variables instead of hardcoding the key:
 
 ```json
 {
   "mcpServers": {
     "bugzilla": {
+      "type": "http",
       "url": "https://bugzilla.fastmcp.app/mcp",
       "headers": {
-        "api_key": "your-api-key-here",
-        "bugzilla_url": "https://bugzilla.example.com"
+        "api_key": "${BUGZILLA_API_KEY}",
+        "bugzilla_url": "${BUGZILLA_URL}"
       }
     }
   }
 }
 ```
+
+### With Claude Desktop
+
+Claude Desktop's `claude_desktop_config.json` only supports local (stdio) servers, so connect through the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge (requires Node.js):
+
+```json
+{
+  "mcpServers": {
+    "bugzilla": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://bugzilla.fastmcp.app/mcp",
+        "--header",
+        "api_key:your-api-key-here",
+        "--header",
+        "bugzilla_url:https://bugzilla.example.com"
+      ]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving.
 
 > **Note**: For local development, use `http://127.0.0.1:8000/mcp` instead.
 
