@@ -25,6 +25,8 @@ The server requires HTTP headers for authentication. Configure your MCP client w
 - **`bugzilla_url`** (Required) - The base URL of your Bugzilla instance (Bugzilla 5.0+)
   - Example: `https://bugzilla.test.org`
 
+> **How the key is sent**: the server forwards your key to Bugzilla in the `X-BUGZILLA-API-KEY` header. Stock Bugzilla 5.0/5.2 don't support that header, so for them it falls back to `?api_key=` (deprecated, see [Deprecations](#deprecations)).
+>
 > **Hosted server**: when you use `https://bugzilla.fastmcp.app/mcp`, your API key passes through that server on its way to your Bugzilla instance. If you don't want a third party to handle your key, [run the server locally](#running-the-server-locally).
 
 ## Usage
@@ -158,6 +160,17 @@ uv run pytest tests
 # Inspect the server
 uv run fastmcp inspect server.py:mcp
 ```
+
+## Deprecations
+
+### API key in the query string (Bugzilla 5.0 / 5.2)
+
+The server sends your API key to Bugzilla in the `X-BUGZILLA-API-KEY` header, which keeps it out of URLs and access logs. Stock Bugzilla **5.0 and 5.2 don't read that header**, so for those instances the server falls back to sending the key as `?api_key=` (the previous behaviour) and logs a deprecation warning.
+
+- **Nothing breaks**: existing setups keep working with no config changes.
+- The server detects support automatically, once per Bugzilla URL, using a probe that never sends your real key.
+- bugzilla.mozilla.org and Bugzilla `master` already use the header.
+- The query-string fallback will be removed once a stable Bugzilla release supports the header. Until then, if your Bugzilla runs 5.0/5.2, make sure its web server and any proxies don't keep query strings in access logs.
 
 ## Security Considerations
 
