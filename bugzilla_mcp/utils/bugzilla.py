@@ -1,8 +1,10 @@
 """Bugzilla API client"""
 
+import asyncio
 import base64
 import logging
 import os
+from collections import Counter
 from typing import Any
 import httpx
 
@@ -13,6 +15,25 @@ API_KEY_HEADER = "X-BUGZILLA-API-KEY"
 # Bugzilla base URL -> whether that instance reads the API key header.
 # Keyed by URL only (no secrets). Re-probed after a process restart.
 _header_auth_support: dict[str, bool] = {}
+
+CLOSED_STATUSES = {"RESOLVED", "VERIFIED", "CLOSED"}
+NOT_A_BUG_RESOLUTIONS = {"INVALID", "WONTFIX", "DUPLICATE", "WORKSFORME", "NOTABUG"}
+OPEN_STATUSES = {"NEW", "ASSIGNED", "REOPENED", "UNCONFIRMED"}
+
+
+def classify_bug(bug: dict[str, Any]) -> str:
+    """Triage heuristic: 'invalid' (closed as not-a-bug), 'to_fix' (open) or 'review_needed'"""
+    status = bug.get("status", "")
+    if status in CLOSED_STATUSES and bug.get("resolution", "") in NOT_A_BUG_RESOLUTIONS:
+        return "invalid"
+    if status in OPEN_STATUSES:
+        return "to_fix"
+    return "review_needed"
+
+
+def _set_if_given(payload: dict[str, Any], **fields: Any) -> None:
+    """Copy only the fields the caller actually passed (not None)"""
+    payload.update({k: v for k, v in fields.items() if v is not None})
 
 
 class Bugzilla:
@@ -72,49 +93,29 @@ class Bugzilla:
             return {API_KEY_HEADER: self.api_key}, {}
         return {}, {"api_key": self.api_key}
 
-    async def bug_info(self, bug_id: int) -> dict[str, Any]:
-        """get information about a given bug"""
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        ok: tuple[int, ...] = (200,),
+        what: str = "fetch API",
+    ) -> Any:
+        """Authenticated REST call; returns the decoded JSON or raises on an unexpected status."""
+        headers, auth_params = await self.auth()
+        kwargs: dict[str, Any] = {"headers": headers, "params": {**auth_params, **(params or {})}}
+        if json is not None:
+            kwargs["json"] = json
 
-        headers, params = await self.auth()
-        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}", headers=headers, params=params)
+        r = await getattr(self.client, method)(url=f"{self.api_url}{path}", **kwargs)
 
-        if r.status_code != 200:
+        if r.status_code not in ok:
+            # Bugzilla's error text explains rejected writes; reads only need the code
+            detail = f" — {r.text}" if method != "get" else ""
             raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
+                f"Failed to {what} with Status code: {r.status_code}{detail}"
             )
-
-        return r.json()["bugs"][0]
-
-    async def bug_comments(self, bug_id: int) -> dict[str, Any]:
-        """Get comments of a bug"""
-
-        headers, params = await self.auth()
-        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}/comment", headers=headers, params=params)
-
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-
-        return r.json()["bugs"][f"{bug_id}"]["comments"]
-
-    async def add_comment(
-        self, bug_id: int, comment: str, is_private: bool
-    ) -> dict[str, int]:
-        """Add a comment to bug, which can optionally be private"""
-
-        c = {"comment": comment, "is_private": is_private}
-
-        headers, params = await self.auth()
-        r = await self.client.post(
-            url=f"{self.api_url}/bug/{bug_id}/comment", headers=headers, params=params, json=c
-        )
-
-        if r.status_code != 201:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-
         return r.json()
 
     def _require_local_files(self) -> None:
@@ -125,361 +126,197 @@ class Bugzilla:
                 "pass text or data_base64 to upload_attachment."
             )
 
+    async def bug_info(self, bug_id: int) -> dict[str, Any]:
+        """get information about a given bug"""
+        return (await self._request("get", f"/bug/{bug_id}"))["bugs"][0]
+
+    async def bug_comments(self, bug_id: int) -> dict[str, Any]:
+        """Get comments of a bug"""
+        data = await self._request("get", f"/bug/{bug_id}/comment")
+        return data["bugs"][f"{bug_id}"]["comments"]
+
+    async def add_comment(
+        self, bug_id: int, comment: str, is_private: bool
+    ) -> dict[str, int]:
+        """Add a comment to bug, which can optionally be private"""
+        return await self._request(
+            "post",
+            f"/bug/{bug_id}/comment",
+            json={"comment": comment, "is_private": is_private},
+            ok=(201,),
+        )
+
     async def bug_attachments(self, bug_id: int) -> list[dict[str, Any]]:
         """List a bug's attachments (metadata only, no file data)"""
-        headers, params = await self.auth()
-        params["exclude_fields"] = "data"
-        r = await self.client.get(
-            url=f"{self.api_url}/bug/{bug_id}/attachment", headers=headers, params=params
+        data = await self._request(
+            "get", f"/bug/{bug_id}/attachment", params={"exclude_fields": "data"}
         )
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-        return r.json().get("bugs", {}).get(str(bug_id), [])
+        return data.get("bugs", {}).get(str(bug_id), [])
 
     async def get_attachment(self, attachment_id: int) -> dict[str, Any]:
         """Fetch one attachment including its base64 `data`"""
-        headers, params = await self.auth()
-        r = await self.client.get(
-            url=f"{self.api_url}/bug/attachment/{attachment_id}", headers=headers, params=params
-        )
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-        att = r.json().get("attachments", {}).get(str(attachment_id))
+        data = await self._request("get", f"/bug/attachment/{attachment_id}")
+        att = data.get("attachments", {}).get(str(attachment_id))
         if not att:
-            raise ValueError(f"Attachment {attachment_id} not found")
+            raise ValueError(f"Attachment {attachment_id} not found in response")
         return att
+
+    @staticmethod
+    def _save_attachment(att: dict[str, Any], dest_dir: str | None) -> str:
+        """Decode an attachment into dest_dir (default: <project>/tmp) and return its path"""
+        if dest_dir is None:
+            project_root = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
+            dest_dir = os.path.join(project_root, "tmp")
+        os.makedirs(dest_dir, exist_ok=True)
+
+        try:
+            content = base64.b64decode(att["data"])
+        except Exception as e:
+            raise ValueError(f"Failed to decode attachment {att.get('id')}: {e}")
+
+        # basename() keeps a hostile file_name from escaping dest_dir
+        dest_path = os.path.join(dest_dir, f"{att.get('id')}_{os.path.basename(att.get('file_name') or '')}")
+        with open(dest_path, "wb") as f:
+            f.write(content)
+        return dest_path
+
+    @staticmethod
+    def _saved(att: dict[str, Any], path: str, bug_id: int | None = None) -> dict[str, Any]:
+        return {
+            "id": att.get("id"),
+            "bug_id": bug_id if bug_id is not None else att.get("bug_id"),
+            "file_name": att.get("file_name"),
+            "content_type": att.get("content_type"),
+            "size": att.get("size"),
+            "path": path,
+        }
 
     async def download_attachments(
         self, bug_id: int, dest_dir: str | None = None
     ) -> list[dict[str, Any]]:
-        """Download all attachments for a specific bug to a temporary directory.
-
-        Args:
-            bug_id: The ID of the bug.
-            dest_dir: Optional destination directory. If not specified, a 'tmp'
-                      directory in the project root will be used.
+        """Download all attachments of a bug to dest_dir (local server only).
 
         Returns:
-            A list of dicts containing attachment metadata and the local path:
-            [{"id": 123, "file_name": "...", "path": "...", "size": 1024}]
+            [{"id", "bug_id", "file_name", "content_type", "size", "path"}, ...]
         """
         self._require_local_files()
-        headers, params = await self.auth()
-        r = await self.client.get(
-            url=f"{self.api_url}/bug/{bug_id}/attachment", headers=headers, params=params
-        )
-
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-
-        data = r.json()
-        bugs_data = data.get("bugs", {})
-        attachments = (
-            bugs_data.get(str(bug_id)) or bugs_data.get(bug_id) or []
-        )
-
-        if dest_dir is None:
-            # Create a tmp directory in the project root
-            project_root = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            )
-            dest_dir = os.path.join(project_root, "tmp")
-
-        os.makedirs(dest_dir, exist_ok=True)
-
-        downloaded = []
-        for att in attachments:
-            att_id = att.get("id")
-            file_name = att.get("file_name")
-            b64_data = att.get("data")
-
-            if not b64_data:
-                continue
-
-            try:
-                file_content = base64.b64decode(b64_data)
-            except Exception as e:
-                raise ValueError(f"Failed to decode attachment {att_id}: {e}")
-
-            # Construct safe filename
-            safe_file_name = os.path.basename(file_name)
-            safe_file_name = f"{att_id}_{safe_file_name}"
-            dest_path = os.path.join(dest_dir, safe_file_name)
-
-            with open(dest_path, "wb") as f:
-                f.write(file_content)
-
-            downloaded.append(
-                {
-                    "id": att_id,
-                    "bug_id": bug_id,
-                    "file_name": file_name,
-                    "content_type": att.get("content_type"),
-                    "size": att.get("size"),
-                    "path": dest_path,
-                }
-            )
-
-        return downloaded
+        bugs = (await self._request("get", f"/bug/{bug_id}/attachment")).get("bugs", {})
+        attachments = bugs.get(str(bug_id)) or bugs.get(bug_id) or []
+        return [
+            self._saved(att, self._save_attachment(att, dest_dir), bug_id)
+            for att in attachments
+            if att.get("data")
+        ]
 
     async def download_attachment(
         self, attachment_id: int, dest_dir: str | None = None
     ) -> dict[str, Any]:
-        """Download a specific attachment by its ID.
-
-        Args:
-            attachment_id: The ID of the attachment.
-            dest_dir: Optional destination directory. If not specified, a 'tmp'
-                      directory in the project root will be used.
+        """Download one attachment to dest_dir (local server only).
 
         Returns:
-            A dict containing attachment metadata and the local path:
-            {"id": 123, "file_name": "...", "path": "...", "size": 1024}
+            {"id", "bug_id", "file_name", "content_type", "size", "path"}
         """
         self._require_local_files()
-        headers, params = await self.auth()
-        r = await self.client.get(
-            url=f"{self.api_url}/bug/attachment/{attachment_id}",
-            headers=headers, params=params,
-        )
-
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-
-        data = r.json()
-        attachments_data = data.get("attachments", {})
-        att = attachments_data.get(str(attachment_id)) or attachments_data.get(
-            attachment_id
-        )
-
-        if not att:
-            raise ValueError(f"Attachment {attachment_id} not found in response")
-
-        b64_data = att.get("data")
-        if not b64_data:
+        att = await self.get_attachment(attachment_id)
+        if not att.get("data"):
             raise ValueError(f"No data field found in attachment {attachment_id}")
-
-        if dest_dir is None:
-            # Create a tmp directory in the project root
-            project_root = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            )
-            dest_dir = os.path.join(project_root, "tmp")
-
-        os.makedirs(dest_dir, exist_ok=True)
-
-        try:
-            file_content = base64.b64decode(b64_data)
-        except Exception as e:
-            raise ValueError(f"Failed to decode attachment {attachment_id}: {e}")
-
-        file_name = att.get("file_name")
-        safe_file_name = os.path.basename(file_name)
-        safe_file_name = f"{attachment_id}_{safe_file_name}"
-        dest_path = os.path.join(dest_dir, safe_file_name)
-
-        with open(dest_path, "wb") as f:
-            f.write(file_content)
-
-        return {
-            "id": attachment_id,
-            "bug_id": att.get("bug_id"),
-            "file_name": file_name,
-            "content_type": att.get("content_type"),
-            "size": att.get("size"),
-            "path": dest_path,
-        }
+        return self._saved(att, self._save_attachment(att, dest_dir))
 
     async def bugs_info(self, bug_ids: list[int]) -> list[dict[str, Any]]:
         """get information about multiple bugs in a single request"""
         if not bug_ids:
             return []
+        data = await self._request("get", "/bug", params={"id": ",".join(map(str, bug_ids))})
+        return data.get("bugs", [])
 
-        # Join ids with commas
-        ids_str = ",".join(map(str, bug_ids))
-        headers, params = await self.auth()
-        params["id"] = ids_str
-
-        r = await self.client.get(url=f"{self.api_url}/bug", headers=headers, params=params)
-
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch API with Status code: {r.status_code}"
-            )
-
-        return r.json().get("bugs", [])
-
-    async def bugs_comments(self, bug_ids: list[int]) -> dict[str, list[dict[str, Any]]]:
-        """fetch comments for multiple bugs in parallel using asyncio.gather"""
-        if not bug_ids:
-            return {}
-
-        import asyncio
+    async def bugs_comments(self, bug_ids: list[int]) -> dict[str, Any]:
+        """Fetch comments for multiple bugs in parallel"""
 
         async def fetch_one(bug_id: int):
             try:
-                comments = await self.bug_comments(bug_id)
-                return str(bug_id), comments
+                return str(bug_id), await self.bug_comments(bug_id)
             except Exception as e:
                 return str(bug_id), {"error": f"Failed to fetch comments: {e}"}
 
-        tasks = [fetch_one(bid) for bid in bug_ids]
-        results = await asyncio.gather(*tasks)
-        return dict(results)
+        return dict(await asyncio.gather(*(fetch_one(b) for b in bug_ids)))
 
     async def bugs_analysis_context(self, bug_ids: list[int]) -> dict[str, Any]:
         """Gather bug info and comment previews in parallel to return a prompt-friendly analysis payload"""
         if not bug_ids:
             return {}
 
-        # Fetch all bug details in a single request
         try:
             info_list = await self.bugs_info(bug_ids)
         except Exception as e:
             raise httpx.TransportError(f"Failed to gather batch bug info: {e}")
 
-        # Fetch comments in parallel
         comments_dict = await self.bugs_comments(bug_ids)
 
-        # Merge them into a structured dict mapping bug_id -> merged details
         merged = {}
         for info in info_list:
             bid = info.get("id")
-            bid_str = str(bid)
-            comments = comments_dict.get(bid_str, [])
-
-            # Limit comments to most relevant to avoid token explosion
-            comments_preview = []
-            if len(comments) <= 4:
-                comments_preview = comments
+            comments = comments_dict.get(str(bid), [])
+            if isinstance(comments, dict):  # fetch failed; keep the error visible
+                comments_preview, count = [comments], 0
             else:
-                comments_preview = (
+                count = len(comments)
+                # First and last two comments are enough context; keep tokens down
+                comments_preview = comments if count <= 4 else (
                     comments[:2]
-                    + [
-                        {
-                            "text": f"... [{len(comments)-4} comments omitted] ...",
-                            "is_private": False,
-                            "creator": "System",
-                        }
-                    ]
+                    + [{"text": f"... [{count - 4} comments omitted] ...", "is_private": False, "creator": "System"}]
                     + comments[-2:]
                 )
 
-            merged[bid_str] = {
-                "id": bid,
-                "product": info.get("product"),
-                "component": info.get("component"),
-                "summary": info.get("summary"),
-                "status": info.get("status"),
-                "resolution": info.get("resolution"),
-                "assigned_to": info.get("assigned_to"),
-                "creator": info.get("creator"),
-                "last_change_time": info.get("last_change_time"),
-                "severity": info.get("severity"),
-                "priority": info.get("priority"),
-                "comments_count": len(comments),
+            merged[str(bid)] = {
+                **{k: info.get(k) for k in (
+                    "id", "product", "component", "summary", "status", "resolution",
+                    "assigned_to", "creator", "last_change_time", "severity", "priority",
+                )},
+                "comments_count": count,
                 "comments_preview": comments_preview,
             }
 
         return merged
 
     async def bugs_stats_analysis(self, bug_ids: list[int]) -> dict[str, Any]:
-        """Fetch bug info and perform high-level statistical analysis based on classifications and properties.
-
-        Args:
-            bug_ids: The list of bug IDs to analyze.
-
-        Returns:
-            A structured dict of counts and percentages of classifications, products, components,
-            severity, priority, and assignees.
-        """
-        if not bug_ids:
-            return {
-                "total_bugs": 0,
-                "classifications": {},
-                "products": {},
-                "components": {},
-                "to_fix_severity": {},
-                "to_fix_priority": {},
-                "assignee_distribution": {},
-            }
-
-        info_list = await self.bugs_info(bug_ids)
+        """Counts and percentages of triage classification, product, component and assignee,
+        plus severity/priority breakdown of the bugs still to fix."""
+        info_list = await self.bugs_info(bug_ids) if bug_ids else []
         total = len(info_list)
+
+        classes = Counter({"to_fix": 0, "invalid": 0, "review_needed": 0})
+        products, components, assignees = Counter(), Counter(), Counter()
+        to_fix_severity, to_fix_priority = Counter(), Counter()
+
+        for info in info_list:
+            classification = classify_bug(info)
+            classes[classification] += 1
+            if classification == "to_fix":
+                to_fix_severity[info.get("severity", "Unknown")] += 1
+                to_fix_priority[info.get("priority", "Unknown")] += 1
+            products[info.get("product", "Unknown")] += 1
+            components[info.get("component", "Unknown")] += 1
+            assignees[info.get("assigned_to", "unassigned")] += 1
+
+        def distribution(counts: Counter) -> dict[str, dict[str, Any]]:
+            return {k: {"count": v, "percentage": round(v / total * 100, 2)} for k, v in counts.items()}
 
         if total == 0:
             return {
-                "total_bugs": 0,
-                "classifications": {},
-                "products": {},
-                "components": {},
-                "to_fix_severity": {},
-                "to_fix_priority": {},
-                "assignee_distribution": {},
+                "total_bugs": 0, "classifications": {}, "products": {}, "components": {},
+                "to_fix_severity": {}, "to_fix_priority": {}, "assignee_distribution": {},
             }
-
-        # Initialize counts
-        class_counts = {"to_fix": 0, "invalid": 0, "review_needed": 0}
-        product_counts = {}
-        component_counts = {}
-        to_fix_severity = {}
-        to_fix_priority = {}
-        assignee_counts = {}
-
-        for info in info_list:
-            status = info.get("status", "")
-            resolution = info.get("resolution", "")
-            product = info.get("product", "Unknown")
-            component = info.get("component", "Unknown")
-            severity = info.get("severity", "Unknown")
-            priority = info.get("priority", "Unknown")
-            assigned_to = info.get("assigned_to", "unassigned")
-
-            # Classification heuristics
-            is_closed_invalid = (
-                status in ["RESOLVED", "VERIFIED", "CLOSED"]
-                and resolution in ["INVALID", "WONTFIX", "DUPLICATE", "WORKSFORME", "NOTABUG"]
-            )
-            is_active_valid = status in ["NEW", "ASSIGNED", "REOPENED", "UNCONFIRMED"]
-
-            classification = "review_needed"
-            if is_closed_invalid:
-                classification = "invalid"
-            elif is_active_valid:
-                classification = "to_fix"
-                # Severity and Priority breakdown specifically for "to_fix" bugs
-                to_fix_severity[severity] = to_fix_severity.get(severity, 0) + 1
-                to_fix_priority[priority] = to_fix_priority.get(priority, 0) + 1
-
-            class_counts[classification] += 1
-            product_counts[product] = product_counts.get(product, 0) + 1
-            component_counts[component] = component_counts.get(component, 0) + 1
-            assignee_counts[assigned_to] = assignee_counts.get(assigned_to, 0) + 1
-
-        # Helper to compute counts and percentages
-        def make_distribution(counts_dict: dict[str, int]) -> dict[str, dict[str, Any]]:
-            dist = {}
-            for key, val in counts_dict.items():
-                pct = round((val / total) * 100, 2)
-                dist[key] = {"count": val, "percentage": pct}
-            return dist
 
         return {
             "total_bugs": total,
-            "classifications": make_distribution(class_counts),
-            "products": make_distribution(product_counts),
-            "components": make_distribution(component_counts),
-            "to_fix_severity": to_fix_severity,
-            "to_fix_priority": to_fix_priority,
-            "assignee_distribution": make_distribution(assignee_counts),
+            "classifications": distribution(classes),
+            "products": distribution(products),
+            "components": distribution(components),
+            "to_fix_severity": dict(to_fix_severity),
+            "to_fix_priority": dict(to_fix_priority),
+            "assignee_distribution": distribution(assignees),
         }
 
     async def create_bug(
@@ -507,27 +344,16 @@ class Bugzilla:
             "version": version,
             "description": description,
         }
-        if severity is not None:
-            payload["severity"] = severity
-        if priority is not None:
-            payload["priority"] = priority
-        if assigned_to is not None:
-            payload["assigned_to"] = assigned_to
-        if keywords:
-            payload["keywords"] = keywords
-        if target_milestone is not None:
-            payload["target_milestone"] = target_milestone
-
-        headers, params = await self.auth()
-        r = await self.client.post(
-            url=f"{self.api_url}/bug", headers=headers, params=params, json=payload
+        _set_if_given(
+            payload,
+            severity=severity,
+            priority=priority,
+            assigned_to=assigned_to,
+            keywords=keywords or None,
+            target_milestone=target_milestone,
         )
         # Bugzilla answers 201 Created; accept 200 too for forks that differ
-        if r.status_code not in (200, 201):
-            raise httpx.TransportError(
-                f"Failed to create bug with Status code: {r.status_code} — {r.text}"
-            )
-        return r.json()
+        return await self._request("post", "/bug", json=payload, ok=(200, 201), what="create bug")
 
     async def update_bug(
         self,
@@ -563,64 +389,36 @@ class Bugzilla:
             {"bugs": [{"id": ..., "last_change_time": ...}]}
         """
         payload: dict[str, Any] = {"ids": ids}
-        if status is not None:
-            payload["status"] = status
-        if resolution is not None:
-            payload["resolution"] = resolution
-        if assigned_to is not None:
-            payload["assigned_to"] = assigned_to
-        if severity is not None:
-            payload["severity"] = severity
-        if priority is not None:
-            payload["priority"] = priority
-        if whiteboard is not None:
-            payload["whiteboard"] = whiteboard
-        if comment is not None:
-            payload["comment"] = {"body": comment, "is_private": comment_is_private}
-        if dupe_of is not None:
-            payload["dupe_of"] = dupe_of
-        if target_milestone is not None:
-            payload["target_milestone"] = target_milestone
-        if version is not None:
-            payload["version"] = version
-        if summary is not None:
-            payload["summary"] = summary
-        if product is not None:
-            payload["product"] = product
-        if component is not None:
-            payload["component"] = component
-        if op_sys is not None:
-            payload["op_sys"] = op_sys
-        if platform is not None:
-            payload["platform"] = platform
-        if qa_contact is not None:
-            payload["qa_contact"] = qa_contact
-        if url is not None:
-            payload["url"] = url
-        if keywords is not None:
-            payload["keywords"] = keywords
-        if cc is not None:
-            payload["cc"] = cc
-        if see_also is not None:
-            payload["see_also"] = see_also
-        if blocks is not None:
-            payload["blocks"] = blocks
-        if depends_on is not None:
-            payload["depends_on"] = depends_on
+        _set_if_given(
+            payload,
+            status=status,
+            resolution=resolution,
+            assigned_to=assigned_to,
+            severity=severity,
+            priority=priority,
+            whiteboard=whiteboard,
+            comment={"body": comment, "is_private": comment_is_private} if comment is not None else None,
+            dupe_of=dupe_of,
+            target_milestone=target_milestone,
+            version=version,
+            summary=summary,
+            product=product,
+            component=component,
+            op_sys=op_sys,
+            platform=platform,
+            qa_contact=qa_contact,
+            url=url,
+            keywords=keywords,
+            cc=cc,
+            see_also=see_also,
+            blocks=blocks,
+            depends_on=depends_on,
+        )
         if extra_fields is not None:
             payload.update(extra_fields)
 
-        # Bugzilla REST update accepts the first id in the URL
-        bug_id = ids[0]
-        headers, params = await self.auth()
-        r = await self.client.put(
-            url=f"{self.api_url}/bug/{bug_id}", headers=headers, params=params, json=payload
-        )
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to update bug with Status code: {r.status_code} — {r.text}"
-            )
-        return r.json()
+        # Bugzilla REST takes one id in the URL; `ids` in the body updates them all
+        return await self._request("put", f"/bug/{ids[0]}", json=payload, what="update bug")
 
     async def bug_history(
         self, bug_id: int, new_since: str | None = None
@@ -634,18 +432,10 @@ class Bugzilla:
         Returns:
             List of history objects with when/who/changes.
         """
-        headers, params = await self.auth()
-        if new_since is not None:
-            params["new_since"] = new_since
-
-        r = await self.client.get(
-            url=f"{self.api_url}/bug/{bug_id}/history", headers=headers, params=params
-        )
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch bug history with Status code: {r.status_code}"
-            )
-        bugs = r.json().get("bugs", [])
+        params: dict[str, Any] = {}
+        _set_if_given(params, new_since=new_since)
+        data = await self._request("get", f"/bug/{bug_id}/history", params=params, what="fetch bug history")
+        bugs = data.get("bugs", [])
         return bugs[0].get("history", []) if bugs else []
 
     async def bugs_advanced_search(
@@ -671,51 +461,24 @@ class Bugzilla:
         Returns:
             List of bug dicts with essential fields only to preserve token budget.
         """
-        headers, params = await self.auth()
-        params["limit"] = limit
-        params["offset"] = offset
+        filters = {
+            "product": product, "component": component, "status": status,
+            "resolution": resolution, "assigned_to": assigned_to, "creator": creator,
+            "severity": severity, "priority": priority, "creation_time": creation_time,
+            "last_change_time": last_change_time, "keywords": keywords,
+            "version": version, "target_milestone": target_milestone,
+        }
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params.update({k: v for k, v in filters.items() if v})
 
-        if product:
-            params["product"] = product
-        if component:
-            params["component"] = component
-        if status:
-            params["status"] = status
-        if resolution:
-            params["resolution"] = resolution
-        if assigned_to:
-            params["assigned_to"] = assigned_to
-        if creator:
-            params["creator"] = creator
-        if severity:
-            params["severity"] = severity
-        if priority:
-            params["priority"] = priority
-        if creation_time:
-            params["creation_time"] = creation_time
-        if last_change_time:
-            params["last_change_time"] = last_change_time
-        if keywords:
-            params["keywords"] = keywords
-        if version:
-            params["version"] = version
-        if target_milestone:
-            params["target_milestone"] = target_milestone
+        data = await self._request("get", "/bug", params=params, what="search bugs")
 
-        r = await self.client.get(url=f"{self.api_url}/bug", headers=headers, params=params)
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to search bugs with Status code: {r.status_code}"
-            )
-
-        bugs = r.json().get("bugs", [])
-        # Return only essential fields for token efficiency
-        essential_keys = {
+        essential_keys = (
             "id", "summary", "status", "resolution",
             "product", "component", "assigned_to", "priority", "severity",
             "creation_time", "last_change_time",
-        }
-        return [{k: b.get(k) for k in essential_keys} for b in bugs]
+        )
+        return [{k: b.get(k) for k in essential_keys} for b in data.get("bugs", [])]
 
     async def bug_dependencies(self, bug_id: int) -> dict[str, Any]:
         """Fetch dependency info (blocks / depends_on) for a bug.
@@ -723,13 +486,7 @@ class Bugzilla:
         Returns:
             {"id": ..., "blocks": [...], "depends_on": [...]}
         """
-        headers, params = await self.auth()
-        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}", headers=headers, params=params)
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch bug with Status code: {r.status_code}"
-            )
-        bug = r.json()["bugs"][0]
+        bug = await self.bug_info(bug_id)
         return {
             "id": bug.get("id"),
             "summary": bug.get("summary"),
@@ -741,44 +498,20 @@ class Bugzilla:
     async def duplicate_chain(
         self, bug_id: int, max_depth: int = 10
     ) -> list[dict[str, Any]]:
-        """Traverse the chain of duplicate bugs until reaching the canonical root.
-
-        Args:
-            bug_id: Starting bug ID.
-            max_depth: Maximum recursion depth to prevent infinite loops.
+        """Follow dupe_of links from a bug to the canonical root.
 
         Returns:
-            Ordered list from child to root: [{"id", "summary", "dupe_of"}, ...]
+            Ordered list from child to root: [{"id", "summary", "status", "dupe_of"}, ...]
         """
         chain: list[dict[str, Any]] = []
         visited: set[int] = set()
-        current_id: int = bug_id
-        depth: int = 0
+        current_id: int | None = bug_id
 
-        while current_id is not None and depth < max_depth:
-            if current_id in visited:
-                break
+        while current_id is not None and len(chain) < max_depth and current_id not in visited:
             visited.add(current_id)
-
-            headers, params = await self.auth()
-            r = await self.client.get(
-                url=f"{self.api_url}/bug/{current_id}", headers=headers, params=params
-            )
-            if r.status_code != 200:
-                raise httpx.TransportError(
-                    f"Failed to fetch bug {current_id} with Status code: {r.status_code}"
-                )
-            bug = r.json()["bugs"][0]
-            chain.append(
-                {
-                    "id": bug.get("id"),
-                    "summary": bug.get("summary"),
-                    "status": bug.get("status"),
-                    "dupe_of": bug.get("dupe_of"),
-                }
-            )
+            bug = await self.bug_info(current_id)
+            chain.append({k: bug.get(k) for k in ("id", "summary", "status", "dupe_of")})
             current_id = bug.get("dupe_of")
-            depth += 1
 
         return chain
 
@@ -790,18 +523,9 @@ class Bugzilla:
         Returns:
             List of user objects with id, real_name, name, email, can_login.
         """
-        headers, params = await self.auth()
-        if names:
-            params["names"] = names
-        if ids:
-            params["ids"] = ids
-
-        r = await self.client.get(url=f"{self.api_url}/user", headers=headers, params=params)
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch users with Status code: {r.status_code}"
-            )
-        return r.json().get("users", [])
+        params = {k: v for k, v in {"names": names, "ids": ids}.items() if v}
+        data = await self._request("get", "/user", params=params, what="fetch users")
+        return data.get("users", [])
 
     async def search_users(self, match: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search for Bugzilla users by partial name or email (substring match).
@@ -809,16 +533,10 @@ class Bugzilla:
         Returns:
             List of matching user objects.
         """
-        headers, params = await self.auth()
-        params["match"] = match
-        params["limit"] = limit
-
-        r = await self.client.get(url=f"{self.api_url}/user", headers=headers, params=params)
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to search users with Status code: {r.status_code}"
-            )
-        return r.json().get("users", [])
+        data = await self._request(
+            "get", "/user", params={"match": match, "limit": limit}, what="search users"
+        )
+        return data.get("users", [])
 
     async def list_products(self) -> list[dict[str, Any]]:
         """List all products that the authenticated user can access.
@@ -826,35 +544,14 @@ class Bugzilla:
         Returns:
             List of product objects with id, name, description, is_active.
         """
-        # First get accessible product IDs, then fetch their details
-        headers, params = await self.auth()
-        r = await self.client.get(
-            url=f"{self.api_url}/product_accessible", headers=headers, params=params
-        )
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to list products with Status code: {r.status_code}"
-            )
-        ids = r.json().get("ids", [])
+        ids = (await self._request("get", "/product_accessible", what="list products")).get("ids", [])
         if not ids:
             return []
 
-        headers, params = await self.auth()
-        params["ids"] = ids
-        r2 = await self.client.get(url=f"{self.api_url}/product", headers=headers, params=params)
-        if r2.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch product details with Status code: {r2.status_code}"
-            )
-        products = r2.json().get("products", [])
+        data = await self._request("get", "/product", params={"ids": ids}, what="fetch product details")
         return [
-            {
-                "id": p.get("id"),
-                "name": p.get("name"),
-                "description": p.get("description"),
-                "is_active": p.get("is_active"),
-            }
-            for p in products
+            {k: p.get(k) for k in ("id", "name", "description", "is_active")}
+            for p in data.get("products", [])
         ]
 
     async def get_product_components(
@@ -865,28 +562,19 @@ class Bugzilla:
         Returns:
             {"name": "...", "components": [{"name", "description", "default_assignee"}, ...]}
         """
-        headers, params = await self.auth()
-        params["names"] = product_name
-
-        r = await self.client.get(url=f"{self.api_url}/product", headers=headers, params=params)
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to fetch product with Status code: {r.status_code}"
-            )
-        products = r.json().get("products", [])
+        data = await self._request("get", "/product", params={"names": product_name}, what="fetch product")
+        products = data.get("products", [])
         if not products:
             raise ValueError(f"Product '{product_name}' not found")
 
         product = products[0]
-        components = [
-            {
-                "name": c.get("name"),
-                "description": c.get("description"),
-                "default_assignee": c.get("default_assignee"),
-            }
-            for c in product.get("components", [])
-        ]
-        return {"name": product.get("name"), "components": components}
+        return {
+            "name": product.get("name"),
+            "components": [
+                {k: c.get(k) for k in ("name", "description", "default_assignee")}
+                for c in product.get("components", [])
+            ],
+        }
 
     async def upload_attachment(
         self,
@@ -927,10 +615,9 @@ class Bugzilla:
                 base64.b64decode(data_base64, validate=True)
             except ValueError:
                 raise ValueError("data_base64 is not valid base64")
-            b64_data = data_base64
             if not file_name:
                 raise ValueError("file_name is required with data_base64")
-            final_name = file_name
+            b64_data, final_name = data_base64, file_name
 
         # Auto-detect content_type if not provided
         if content_type is None:
@@ -947,24 +634,12 @@ class Bugzilla:
             "data": b64_data,
             "is_patch": is_patch,
         }
-        if comment is not None:
-            payload["comment"] = comment
+        _set_if_given(payload, comment=comment)
 
-        headers, params = await self.auth()
-        r = await self.client.post(
-            url=f"{self.api_url}/bug/{bug_id}/attachment",
-            headers=headers,
-            params=params,
-            json=payload,
+        data = await self._request(
+            "post", f"/bug/{bug_id}/attachment", json=payload, ok=(200, 201), what="upload attachment"
         )
-
-        if r.status_code not in (200, 201):
-            raise httpx.TransportError(
-                f"Failed to upload attachment with Status code: {r.status_code} — {r.text}"
-            )
-
         # Bugzilla returns {"ids": [<new attachment id>]}
-        data = r.json()
         ids = data.get("ids") or list(data.get("attachments", {}).keys())
         return {"attachment_id": int(ids[0]) if ids else None, "bug_id": bug_id}
 
@@ -976,27 +651,10 @@ class Bugzilla:
         Returns:
             {"tags": [...]}
         """
-        payload: dict[str, Any] = {}
-        if add:
-            payload["add"] = add
-        if remove:
-            payload["remove"] = remove
-
-        headers, params = await self.auth()
-        r = await self.client.put(
-            url=f"{self.api_url}/bug/comment/{comment_id}/tags",
-            headers=headers, params=params,
-            json=payload,
-        )
-        if r.status_code != 200:
-            raise httpx.TransportError(
-                f"Failed to tag comment with Status code: {r.status_code} — {r.text}"
-            )
-        return {"tags": r.json()}
+        payload = {k: v for k, v in {"add": add, "remove": remove}.items() if v}
+        tags = await self._request("put", f"/bug/comment/{comment_id}/tags", json=payload, what="tag comment")
+        return {"tags": tags}
 
     async def close(self):
         """Close the async client"""
         await self.client.aclose()
-
-
-

@@ -32,7 +32,7 @@ uv run python server_local.py
 ### Server Inspection
 Inspect server tools, prompts, and configurations using the FastMCP CLI:
 ```bash
-# Inspect the MCP server schemas and interface (should list 26 tools)
+# Inspect the MCP server schemas and interface (should list 28 tools)
 uv run fastmcp inspect server.py:mcp
 ```
 
@@ -104,12 +104,12 @@ bugzilla-mcp/
 │   │   └── validate_headers.py
 │   ├── tools/                # MCP Tool registration and execution
 │   │   ├── __init__.py
-│   │   └── bugzilla.py       # All 26 tool wrapper functions
-│   ├── utils/                # Bugzilla HTTP utility client & global references
+│   │   └── bugzilla.py       # Tool functions + register_tools() (annotations)
+│   ├── utils/                # Bugzilla REST client; current_bz ContextVar
 │   │   ├── __init__.py
 │   │   └── bugzilla.py       # Bugzilla REST API client class
-│   └── __init__.py           # Package exports for all 26 tools
-├── tests/                    # Complete PyTest Suite (169 tests)
+│   └── __init__.py           # Package exports for all tools
+├── tests/                    # PyTest suite (`uv run pytest tests`)
 │   ├── test_middleware/      # Headers validation & edge case coverage
 │   ├── test_tools/           # MCP tools wrapper tests
 │   │   ├── test_bugzilla.py
@@ -125,7 +125,6 @@ bugzilla-mcp/
 ├── pyproject.toml            # Project dependencies & Python metadata
 ├── server.py                 # HTTP entrypoint (FastMCP, reads headers per-request)
 ├── server_local.py           # stdio entrypoint (reads from env vars)
-├── Agent.md                  # LLM agent usage guide & playbooks
 ├── CLAUDE.md                 # Developer guide (this file)
 └── README.md                 # Public overview and integration guides
 ```
@@ -133,7 +132,11 @@ bugzilla-mcp/
 ### Key Architectural Concepts
 
 1. **Dynamic Client Initialization (`ValidateHeaders` Middleware)**:
-   Because MCP servers are designed to be stateless or multi-tenant, authentication is passed dynamically per request through HTTP headers (`api_key` and `bugzilla_url`). The `ValidateHeaders` middleware extracts these headers on each request and binds a `Bugzilla` client instance to the globally shared reference `bugzilla_mcp.utils.bz`.
+   Because MCP servers are designed to be stateless or multi-tenant, authentication is passed dynamically per request through HTTP headers (`api_key` and `bugzilla_url`). The `ValidateHeaders` middleware extracts these headers on each request and binds a `Bugzilla` client to the `bugzilla_mcp.utils.current_bz` ContextVar for that request only, then closes it. Never store the client in a module global: on the shared hosted server, concurrent users would get each other's credentials. `server_local.py` (single user) sets `current_bz` once at startup.
+
+   The client sends the API key in the `X-BUGZILLA-API-KEY` header when the instance supports it, and falls back to `?api_key=` (deprecated) for stock Bugzilla 5.0/5.2. Every request goes through `Bugzilla._request()`, which handles auth and status checks.
+
+   Tools that touch the server's filesystem (`download_attachment(s)`, `upload_attachment(file_path=...)`) call `_require_local_files()` and only work when the client was created with `allow_local_files=True` (local server only).
 
 2. **Graceful Inspection Fallback**:
    During FastMCP server inspection (via `fastmcp inspect`), HTTP headers are absent. The middleware detects this and initializes a dummy client reference (`https://bugzilla.example.com` / `inspection-placeholder`) to ensure schema discovery works seamlessly without auth failures.
@@ -155,36 +158,9 @@ bugzilla-mcp/
 
 ---
 
-## 📋 Complete Tool List (26 tools)
+## 📋 Tool List
 
-| # | Tool | Category | REST Endpoint |
-|---|---|---|---|
-| 1 | `bug_info` | Read | `GET /rest/bug/(id)` |
-| 2 | `bug_comments` | Read | `GET /rest/bug/(id)/comment` |
-| 3 | `add_comment` | Write | `POST /rest/bug/(id)/comment` |
-| 4 | `bugs_quicksearch` | Search | `GET /rest/bug?quicksearch=` |
-| 5 | `learn_quicksearch_syntax` | Docs | — |
-| 6 | `server_url` | Info | — |
-| 7 | `bug_url` | Info | — |
-| 8 | `download_attachments` | Attachment | `GET /rest/bug/(id)/attachment` |
-| 9 | `download_attachment` | Attachment | `GET /rest/bug/attachment/(id)` |
-| 10 | `bugs_info` | Batch | `GET /rest/bug?id=...` |
-| 11 | `bugs_comments` | Batch | parallel `GET /rest/bug/(id)/comment` |
-| 12 | `bugs_analysis_context` | Batch | parallel detail + comments |
-| 13 | `classify_bugs_heuristics` | Analytics | heuristic on batch metadata |
-| 14 | `analyze_bugs_statistics` | Analytics | statistical aggregation |
-| 15 | `create_bug` | Write | `POST /rest/bug` |
-| 16 | `update_bug` | Write | `PUT /rest/bug/(id)` |
-| 17 | `bug_history` | Read | `GET /rest/bug/(id)/history` |
-| 18 | `bugs_advanced_search` | Search | `GET /rest/bug` (structured) |
-| 19 | `bug_dependencies` | Read | `GET /rest/bug/(id)` blocks/depends_on |
-| 20 | `duplicate_chain` | Read | recursive `dupe_of` traversal |
-| 21 | `get_user` | User | `GET /rest/user` |
-| 22 | `search_users` | User | `GET /rest/user?match=` |
-| 23 | `list_products` | Discovery | `GET /rest/product_accessible` |
-| 24 | `get_product_components` | Discovery | `GET /rest/product/(name)` |
-| 25 | `upload_attachment` | Attachment | `POST /rest/bug/(id)/attachment` |
-| 26 | `tag_comment` | Write | `PUT /rest/bug/comment/(id)/tags` |
+See the Features section of `README.md`. Tools are grouped in `READ_ONLY_TOOLS`, `ADDITIVE_TOOLS` and `DESTRUCTIVE_TOOLS` in `bugzilla_mcp/tools/bugzilla.py`, which decides their MCP annotations.
 
 ---
 
@@ -206,10 +182,10 @@ bugzilla-mcp/
 ### Adding a New Tool (Checklist)
 When adding a new MCP tool, follow these steps in order:
 
-1. **Utility client** (`bugzilla_mcp/utils/bugzilla.py`): Add the `async` method to the `Bugzilla` class.
-2. **Tool wrapper** (`bugzilla_mcp/tools/bugzilla.py`): Add the `async` function with guard for `utils.bz is None` and `ToolError` wrapping.
-3. **Package export** (`bugzilla_mcp/__init__.py`): Add to both the `from .tools.bugzilla import (...)` block and `__all__`.
-4. **Registration** (`server.py`, `server_local.py`): Add `mcp.tool()(your_tool)`.
+1. **Utility client** (`bugzilla_mcp/utils/bugzilla.py`): Add the `async` method to the `Bugzilla` class. Call the API through `self._request(...)`; don't build auth or status checks by hand.
+2. **Tool wrapper** (`bugzilla_mcp/tools/bugzilla.py`): Add the `async` function. Get the client with `bz = _client()` and wrap failures in `ToolError`.
+3. **Registration**: Add the function to `READ_ONLY_TOOLS`, `ADDITIVE_TOOLS` or `DESTRUCTIVE_TOOLS`. `register_tools()` is shared by `server.py` and `server_local.py`.
+4. **Package export** (`bugzilla_mcp/__init__.py`): Add to both the import block and `__all__`.
 5. **Mock** (`tests/conftest.py`): Add `client.your_method = AsyncMock(...)` to `mock_bugzilla_client`.
 6. **Tests** (`tests/test_utils/`, `tests/test_tools/`): Write unit tests for both the utility client and the tool wrapper.
-7. **Docs** (`CLAUDE.md`, `Agent.md`): Update the tool list and playbooks.
+7. **Docs** (`README.md` Features): Mention the new tool.
