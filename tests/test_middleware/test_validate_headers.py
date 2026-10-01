@@ -1,5 +1,6 @@
 """Unit tests for ValidateHeaders middleware"""
 
+import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from fastmcp.exceptions import ValidationError
@@ -21,20 +22,19 @@ class TestValidateHeadersMiddleware:
         return MagicMock()
 
     @pytest.fixture
-    def mock_call_next(self):
-        """Create a mock call_next function that returns an awaitable result"""
-        async_result = AsyncMock(return_value="success")
-        return MagicMock(side_effect=lambda ctx: async_result())
+    def seen(self):
+        """Clients visible to the handler, captured while the request runs"""
+        return []
 
-    @pytest.fixture(autouse=True)
-    def reset_global_bz(self):
-        """Reset the global bz before and after each test"""
-        original_bz = utils.bz
-        utils.bz = None
-        yield
-        utils.bz = original_bz
+    @pytest.fixture
+    def mock_call_next(self, seen):
+        """Create a mock call_next that records the current client and returns an awaitable result"""
+        async def call_next(ctx):
+            seen.append(utils.current_bz.get())
+            return "success"
+        return MagicMock(side_effect=call_next)
 
-    async def test_valid_headers_creates_bugzilla_client(self, middleware, mock_context, mock_call_next):
+    async def test_valid_headers_creates_bugzilla_client(self, middleware, mock_context, mock_call_next, seen):
         """Test that valid headers create a Bugzilla client"""
         headers = {
             "api_key": "test-api-key",
@@ -44,9 +44,9 @@ class TestValidateHeadersMiddleware:
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz is not None
-        assert utils.bz.base_url == "https://bugzilla.example.com"
-        assert utils.bz.api_key == "test-api-key"
+        assert seen[0] is not None
+        assert seen[0].base_url == "https://bugzilla.example.com"
+        assert seen[0].api_key == "test-api-key"
 
     async def test_missing_api_key_raises_validation_error(self, middleware, mock_context, mock_call_next):
         """Test that missing api_key header raises ValidationError"""
@@ -72,7 +72,7 @@ class TestValidateHeadersMiddleware:
         
         assert "bugzilla_url" in str(exc_info.value)
 
-    async def test_url_normalization_adds_https(self, middleware, mock_context, mock_call_next):
+    async def test_url_normalization_adds_https(self, middleware, mock_context, mock_call_next, seen):
         """Test that URL without protocol gets https:// added"""
         headers = {
             "api_key": "test-api-key",
@@ -82,9 +82,9 @@ class TestValidateHeadersMiddleware:
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz.base_url == "https://bugzilla.example.com"
+        assert seen[0].base_url == "https://bugzilla.example.com"
 
-    async def test_url_normalization_preserves_http(self, middleware, mock_context, mock_call_next):
+    async def test_url_normalization_preserves_http(self, middleware, mock_context, mock_call_next, seen):
         """Test that URL with http:// is preserved"""
         headers = {
             "api_key": "test-api-key",
@@ -94,9 +94,9 @@ class TestValidateHeadersMiddleware:
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz.base_url == "http://bugzilla.example.com"
+        assert seen[0].base_url == "http://bugzilla.example.com"
 
-    async def test_url_normalization_preserves_https(self, middleware, mock_context, mock_call_next):
+    async def test_url_normalization_preserves_https(self, middleware, mock_context, mock_call_next, seen):
         """Test that URL with https:// is preserved"""
         headers = {
             "api_key": "test-api-key",
@@ -106,24 +106,24 @@ class TestValidateHeadersMiddleware:
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz.base_url == "https://bugzilla.example.com"
+        assert seen[0].base_url == "https://bugzilla.example.com"
 
-    async def test_empty_headers_creates_dummy_client(self, middleware, mock_context, mock_call_next):
+    async def test_empty_headers_creates_dummy_client(self, middleware, mock_context, mock_call_next, seen):
         """Test that empty headers (inspection mode) creates a dummy client"""
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value={}):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz is not None
-        assert utils.bz.base_url == "https://bugzilla.example.com"
-        assert utils.bz.api_key == "inspection-placeholder"
+        assert seen[0] is not None
+        assert seen[0].base_url == "https://bugzilla.example.com"
+        assert seen[0].api_key == "inspection-placeholder"
 
-    async def test_none_headers_creates_dummy_client(self, middleware, mock_context, mock_call_next):
+    async def test_none_headers_creates_dummy_client(self, middleware, mock_context, mock_call_next, seen):
         """Test that None headers (inspection mode) creates a dummy client"""
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=None):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz is not None
-        assert utils.bz.base_url == "https://bugzilla.example.com"
+        assert seen[0] is not None
+        assert seen[0].base_url == "https://bugzilla.example.com"
 
     async def test_middleware_calls_next(self, middleware, mock_context, mock_call_next):
         """Test that middleware calls the next handler"""
@@ -167,18 +167,17 @@ class TestValidateHeadersUrlEdgeCases:
         return MagicMock()
 
     @pytest.fixture
-    def mock_call_next(self):
-        async_result = AsyncMock(return_value="success")
-        return MagicMock(side_effect=lambda ctx: async_result())
+    def seen(self):
+        return []
 
-    @pytest.fixture(autouse=True)
-    def reset_global_bz(self):
-        original_bz = utils.bz
-        utils.bz = None
-        yield
-        utils.bz = original_bz
+    @pytest.fixture
+    def mock_call_next(self, seen):
+        async def call_next(ctx):
+            seen.append(utils.current_bz.get())
+            return "success"
+        return MagicMock(side_effect=call_next)
 
-    async def test_url_with_path(self, middleware, mock_context, mock_call_next):
+    async def test_url_with_path(self, middleware, mock_context, mock_call_next, seen):
         """Test URL with path is handled correctly"""
         headers = {
             "api_key": "test-api-key",
@@ -188,10 +187,10 @@ class TestValidateHeadersUrlEdgeCases:
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             await middleware.on_message(mock_context, mock_call_next)
         
-        assert utils.bz.base_url == "https://bugzilla.example.com/bugzilla"
-        assert utils.bz.api_url == "https://bugzilla.example.com/bugzilla/rest"
+        assert seen[0].base_url == "https://bugzilla.example.com/bugzilla"
+        assert seen[0].api_url == "https://bugzilla.example.com/bugzilla/rest"
 
-    async def test_url_with_trailing_slash_normalization_not_needed(self, middleware, mock_context, mock_call_next):
+    async def test_url_with_trailing_slash_normalization_not_needed(self, middleware, mock_context, mock_call_next, seen):
         """Test URL with trailing slash (normalization may vary)"""
         headers = {
             "api_key": "test-api-key",
@@ -202,4 +201,51 @@ class TestValidateHeadersUrlEdgeCases:
             await middleware.on_message(mock_context, mock_call_next)
         
         # Should have https:// added
-        assert utils.bz.base_url.startswith("https://")
+        assert seen[0].base_url.startswith("https://")
+
+
+class TestValidateHeadersRequestIsolation:
+    """Each request gets its own client, which is cleared and closed afterwards"""
+
+    async def test_client_cleared_and_closed_after_request(self):
+        headers = {"api_key": "k", "bugzilla_url": "https://bugzilla.example.com"}
+        seen = []
+
+        async def call_next(ctx):
+            seen.append(utils.current_bz.get())
+            return "ok"
+
+        with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
+            await ValidateHeaders().on_message(MagicMock(), call_next)
+
+        assert utils.current_bz.get() is None
+        assert seen[0].client.is_closed
+
+    async def test_concurrent_requests_do_not_share_credentials(self):
+        """Request A must keep its own key even if request B starts while A is in flight"""
+        a_started, b_done = asyncio.Event(), asyncio.Event()
+        keys = {}
+
+        async def call_next_a(ctx):
+            a_started.set()
+            await b_done.wait()
+            keys["a"] = utils.current_bz.get().api_key
+            return "a"
+
+        async def call_next_b(ctx):
+            keys["b"] = utils.current_bz.get().api_key
+            b_done.set()
+            return "b"
+
+        headers = [
+            {"api_key": "key-a", "bugzilla_url": "https://a.example.com"},
+            {"api_key": "key-b", "bugzilla_url": "https://b.example.com"},
+        ]
+        middleware = ValidateHeaders()
+        with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", side_effect=headers):
+            task_a = asyncio.create_task(middleware.on_message(MagicMock(), call_next_a))
+            await a_started.wait()
+            await middleware.on_message(MagicMock(), call_next_b)
+            await task_a
+
+        assert keys == {"a": "key-a", "b": "key-b"}

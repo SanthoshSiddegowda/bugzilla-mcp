@@ -104,7 +104,6 @@ def mock_bugzilla_client():
     client.base_url = "https://bugzilla.mozilla.org"
     client.api_url = "https://bugzilla.mozilla.org/rest"
     client.api_key = "test-api-key"
-    client.params = {"api_key": "test-api-key"}
     
     # Setup async mock methods
     client.bug_info = AsyncMock(return_value=SAMPLE_BUG)
@@ -123,17 +122,15 @@ def mock_bugzilla_client():
 
 @pytest.fixture
 def set_bugzilla_client(mock_bugzilla_client):
-    """Set the global bugzilla client"""
-    original_bz = utils.bz
-    utils.bz = mock_bugzilla_client
+    """Set the current request's bugzilla client"""
+    token = utils.current_bz.set(mock_bugzilla_client)
     yield mock_bugzilla_client
-    utils.bz = original_bz
+    utils.current_bz.reset(token)
 
 
 @pytest.fixture
 def reset_bugzilla_client():
-    """Reset the global bugzilla client to None"""
-    original_bz = utils.bz
-    utils.bz = None
+    """Reset the current request's bugzilla client to None"""
+    token = utils.current_bz.set(None)
     yield
-    utils.bz = original_bz
+    utils.current_bz.reset(token)
