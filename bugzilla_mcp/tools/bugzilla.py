@@ -2,8 +2,10 @@
 
 import base64
 import json
+import os
 import httpx
-from typing import Any
+from typing import Annotated, Any
+from pydantic import Field
 from fastmcp.utilities.types import Image
 from mcp.types import TextContent
 from fastmcp.exceptions import ToolError, PromptError
@@ -19,21 +21,42 @@ def _client() -> utils.Bugzilla:
     return bz
 
 
+def _as_list(value):
+    """Accept one value or a list: assistants often pass `status="NEW"` for a list filter"""
+    if value is None or isinstance(value, list):
+        return value
+    return [value]
+
+
+# Shared parameter types. Statuses, resolutions etc. are instance-specific, so these
+# describe the format with examples instead of a fixed Literal of allowed values.
+BugIds = Annotated[int | list[int], Field(description="One bug id or a list of bug ids, e.g. 12345 or [12345, 12346]")]
+StrFilter = Annotated[str | list[str] | None, Field(description="One value or a list; matches any of them")]
+
+
 def _compact(bug: dict[str, Any]) -> dict[str, Any]:
     """Drop empty fields (e.g. unused cf_* custom fields) to save tokens"""
     return {k: v for k, v in bug.items() if v not in (None, "", [], {})}
 
 
-async def bug_info(id: int, full: bool = False) -> dict[str, Any]:
+async def bug_info(
+    id: int,
+    full: bool = False,
+    include_fields: Annotated[
+        list[str] | None,
+        Field(description='Only return these fields, e.g. ["status", "assigned_to", "cf_qatouch_id"]'),
+    ] = None,
+) -> dict[str, Any]:
     """Returns information about a given bugzilla bug id.
 
-    Empty fields are left out by default; pass full=True for every field.
+    Empty fields are left out by default; pass full=True for every field, or
+    include_fields to fetch only the fields you need.
     """
 
     bz = _client()
 
     try:
-        bug = await bz.bug_info(id)
+        bug = await bz.bug_info(id, include_fields=include_fields)
         # update_token is a form/CSRF token: no use to an assistant
         bug.pop("update_token", None)
         return bug if full else _compact(bug)
@@ -172,42 +195,49 @@ async def download_attachment(attachment_id: int, dest_dir: str | None = None) -
         raise ToolError(f"Failed to download attachment\nReason: {e}")
 
 
-async def bugs_info(ids: list[int]) -> list[dict[str, Any]]:
+async def bugs_info(ids: BugIds) -> list[dict[str, Any]]:
     """Get information about multiple bugs in a single request."""
     bz = _client()
     try:
-        return await bz.bugs_info(ids)
+        return await bz.bugs_info(_as_list(ids))
     except Exception as e:
         raise ToolError(f"Failed to fetch batch bug info\nReason: {e}")
 
 
-async def bugs_comments(ids: list[int]) -> dict[str, list[dict[str, Any]]]:
+async def bugs_comments(ids: BugIds) -> dict[str, list[dict[str, Any]]]:
     """Fetch comments for multiple bugs in parallel."""
     bz = _client()
     try:
-        return await bz.bugs_comments(ids)
+        return await bz.bugs_comments(_as_list(ids))
     except Exception as e:
         raise ToolError(f"Failed to fetch batch comments\nReason: {e}")
 
 
-async def bugs_analysis_context(ids: list[int]) -> dict[str, Any]:
+async def bugs_analysis_context(ids: BugIds) -> dict[str, Any]:
     """Get consolidated prompt-friendly context (info + comments preview) for multiple bugs in parallel."""
     bz = _client()
     try:
-        return await bz.bugs_analysis_context(ids)
+        return await bz.bugs_analysis_context(_as_list(ids))
     except Exception as e:
         raise ToolError(f"Failed to fetch bugs analysis context\nReason: {e}")
 
 
-async def classify_bugs_heuristics(ids: list[int]) -> dict[str, Any]:
-    """Automatically classify a list of bugs into TO_FIX, INVALID, or REVIEW_NEEDED based on server-side heuristics.
+async def classify_bugs_heuristics(ids: BugIds) -> dict[str, Any]:
+    """Group bugs into to_fix, invalid and review_needed using status and resolution only.
 
-    Analyzes status, resolution, summaries, and activity in parallel to deliver instant automated triage.
+    Rules, in order:
+    - invalid: status RESOLVED/VERIFIED/CLOSED and resolution INVALID, WONTFIX,
+      DUPLICATE, WORKSFORME or NOTABUG (closed as not-a-bug)
+    - to_fix: status NEW, ASSIGNED, REOPENED or UNCONFIRMED (still open)
+    - review_needed: everything else, e.g. RESOLVED FIXED, or a custom status
+      such as CONFIRMED that the rules don't know
+
+    It doesn't read summaries or comments; use bugs_analysis_context for that.
     """
     bz = _client()
     try:
         groups: dict[str, list[dict[str, Any]]] = {"to_fix": [], "invalid": [], "review_needed": []}
-        for info in await bz.bugs_info(ids):
+        for info in await bz.bugs_info(_as_list(ids)):
             groups[classify_bug(info)].append(
                 {
                     "id": info.get("id"),
@@ -222,7 +252,7 @@ async def classify_bugs_heuristics(ids: list[int]) -> dict[str, Any]:
         )
 
 
-async def analyze_bugs_statistics(ids: list[int]) -> dict[str, Any]:
+async def analyze_bugs_statistics(ids: BugIds) -> dict[str, Any]:
     """Perform server-side statistical analysis on a batch of bug IDs based on triage classifications.
 
     Returns breakdown of classifications, product distribution, component distribution,
@@ -230,7 +260,7 @@ async def analyze_bugs_statistics(ids: list[int]) -> dict[str, Any]:
     """
     bz = _client()
     try:
-        return await bz.bugs_stats_analysis(ids)
+        return await bz.bugs_stats_analysis(_as_list(ids))
     except Exception as e:
         raise ToolError(f"Failed to perform statistical analysis\nReason: {e}")
 
@@ -244,7 +274,7 @@ async def create_bug(
     severity: str | None = None,
     priority: str | None = None,
     assigned_to: str | None = None,
-    keywords: list[str] | None = None,
+    keywords: Annotated[str | list[str] | None, Field(description='One keyword or a list, e.g. "regression"')] = None,
     target_milestone: str | None = None,
 ) -> dict[str, Any]:
     """File a new bug in Bugzilla.
@@ -262,17 +292,27 @@ async def create_bug(
             severity=severity,
             priority=priority,
             assigned_to=assigned_to,
-            keywords=keywords,
+            keywords=_as_list(keywords),
             target_milestone=target_milestone,
         )
     except Exception as e:
         raise ToolError(f"Failed to create bug\nReason: {e}")
 
 
+AddRemove = Annotated[
+    dict[str, list[str]] | None,
+    Field(description='Changes to a list field, e.g. {"add": ["a@example.com"], "remove": ["b@example.com"]}'),
+]
+AddRemoveIds = Annotated[
+    dict[str, list[int]] | None,
+    Field(description='Changes to a bug list, e.g. {"add": [123], "remove": [456]}; {"set": [...]} replaces it'),
+]
+
+
 async def update_bug(
-    ids: list[int],
-    status: str | None = None,
-    resolution: str | None = None,
+    ids: BugIds,
+    status: Annotated[str | None, Field(description='New status, e.g. "ASSIGNED" or "RESOLVED"; must be a status your Bugzilla defines')] = None,
+    resolution: Annotated[str | None, Field(description='Required when resolving, e.g. "FIXED", "INVALID", "DUPLICATE"')] = None,
     assigned_to: str | None = None,
     severity: str | None = None,
     priority: str | None = None,
@@ -289,12 +329,19 @@ async def update_bug(
     platform: str | None = None,
     qa_contact: str | None = None,
     url: str | None = None,
-    keywords: dict[str, list[str]] | None = None,
-    cc: dict[str, list[str]] | None = None,
-    see_also: dict[str, list[str]] | None = None,
-    blocks: dict[str, list[int]] | None = None,
-    depends_on: dict[str, list[int]] | None = None,
-    extra_fields: dict[str, Any] | None = None,
+    keywords: AddRemove = None,
+    cc: AddRemove = None,
+    see_also: AddRemove = None,
+    blocks: AddRemoveIds = None,
+    depends_on: AddRemoveIds = None,
+    extra_fields: Annotated[
+        dict[str, Any] | None,
+        Field(description='Custom fields, e.g. {"cf_qatouch_id": "123"}'),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        Field(description="Return the planned changes and the bugs' current values without changing anything"),
+    ] = False,
 ) -> dict[str, Any]:
     """Update one or more bugs. Supports changing status, resolution, assignee, severity,
     priority, whiteboard notes, version, summary, product, component, op_sys, platform,
@@ -302,11 +349,14 @@ async def update_bug(
     comment in a single operation.
 
     To mark as duplicate set resolution='DUPLICATE' and dupe_of=<original_bug_id>.
+
+    One call can change many bugs: use dry_run=True first to see what would change.
     """
     bz = _client()
     try:
         return await bz.update_bug(
-            ids=ids,
+            ids=_as_list(ids),
+            dry_run=dry_run,
             status=status,
             resolution=resolution,
             assigned_to=assigned_to,
@@ -350,19 +400,19 @@ async def bug_history(bug_id: int, new_since: str | None = None) -> list[dict[st
 
 
 async def bugs_advanced_search(
-    product: list[str] | None = None,
-    component: list[str] | None = None,
-    status: list[str] | None = None,
-    resolution: list[str] | None = None,
-    assigned_to: str | None = None,
-    creator: str | None = None,
-    severity: list[str] | None = None,
-    priority: list[str] | None = None,
-    creation_time: str | None = None,
-    last_change_time: str | None = None,
-    keywords: list[str] | None = None,
-    version: list[str] | None = None,
-    target_milestone: list[str] | None = None,
+    product: StrFilter = None,
+    component: StrFilter = None,
+    status: Annotated[str | list[str] | None, Field(description='One status or a list, e.g. "NEW" or ["NEW", "ASSIGNED"]')] = None,
+    resolution: Annotated[str | list[str] | None, Field(description='One resolution or a list, e.g. "FIXED"; use "---" for unresolved')] = None,
+    assigned_to: Annotated[str | None, Field(description="Assignee login (email)")] = None,
+    creator: Annotated[str | None, Field(description="Reporter login (email)")] = None,
+    severity: StrFilter = None,
+    priority: StrFilter = None,
+    creation_time: Annotated[str | None, Field(description='Created on or after this ISO 8601 date, e.g. "2026-09-01"')] = None,
+    last_change_time: Annotated[str | None, Field(description='Changed on or after this ISO 8601 date, e.g. "2026-09-01"')] = None,
+    keywords: StrFilter = None,
+    version: StrFilter = None,
+    target_milestone: StrFilter = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -420,7 +470,8 @@ async def duplicate_chain(bug_id: int, max_depth: int = 10) -> list[dict[str, An
 
 
 async def get_user(
-    names: list[str] | None = None, ids: list[int] | None = None
+    names: Annotated[str | list[str] | None, Field(description="One login (email) or a list")] = None,
+    ids: Annotated[int | list[int] | None, Field(description="One user id or a list")] = None,
 ) -> list[dict[str, Any]]:
     """Look up Bugzilla users by login name(s) or user ID(s).
 
@@ -429,7 +480,7 @@ async def get_user(
     """
     bz = _client()
     try:
-        return await bz.get_user(names=names, ids=ids)
+        return await bz.get_user(names=_as_list(names), ids=_as_list(ids))
     except Exception as e:
         raise ToolError(f"Failed to fetch user info\nReason: {e}")
 
@@ -513,8 +564,8 @@ async def upload_attachment(
 
 async def tag_comment(
     comment_id: int,
-    add: list[str] | None = None,
-    remove: list[str] | None = None,
+    add: Annotated[str | list[str] | None, Field(description='One tag or a list, e.g. "needs-review"')] = None,
+    remove: Annotated[str | list[str] | None, Field(description="One tag or a list")] = None,
 ) -> dict[str, Any]:
     """Add or remove tags on a specific bug comment.
 
@@ -523,7 +574,7 @@ async def tag_comment(
     """
     bz = _client()
     try:
-        return await bz.tag_comment(comment_id=comment_id, add=add, remove=remove)
+        return await bz.tag_comment(comment_id=comment_id, add=_as_list(add), remove=_as_list(remove))
     except Exception as e:
         raise ToolError(f"Failed to tag comment\nReason: {e}")
 
@@ -594,19 +645,32 @@ READ_ONLY_TOOLS = [
     search_users, list_products, get_product_components,
 ]
 # Add to Bugzilla (or, locally, write files) without changing existing data
-ADDITIVE_TOOLS = [
-    add_comment, create_bug, upload_attachment, tag_comment,
-    download_attachments, download_attachment,
-]
+ADDITIVE_TOOLS = [add_comment, create_bug, upload_attachment, tag_comment]
+# Write to the server's disk: only registered by the single-user local server
+LOCAL_ONLY_TOOLS = [download_attachments, download_attachment]
 # Change existing bugs: status, assignee, product, ...
 DESTRUCTIVE_TOOLS = [update_bug]
 
 
-def register_tools(mcp) -> None:
-    """Register every tool with hints so clients can ask before writes"""
-    for fn in READ_ONLY_TOOLS:
-        mcp.tool(annotations={"readOnlyHint": True})(fn)
-    for fn in ADDITIVE_TOOLS:
-        mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})(fn)
-    for fn in DESTRUCTIVE_TOOLS:
-        mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True})(fn)
+WRITE_TOOL_NAMES = {fn.__name__ for fn in ADDITIVE_TOOLS + LOCAL_ONLY_TOOLS + DESTRUCTIVE_TOOLS}
+
+DISABLED_TOOLS_ENV = "BUGZILLA_DISABLED_TOOLS"
+
+
+def register_tools(mcp, local_files: bool = False) -> None:
+    """Register tools with hints so clients can ask before writes.
+
+    local_files: also register the tools that save to the server's disk (local server only).
+    Tools named in BUGZILLA_DISABLED_TOOLS (comma-separated) are skipped.
+    """
+    disabled = {n.strip() for n in os.environ.get(DISABLED_TOOLS_ENV, "").split(",") if n.strip()}
+    groups = [
+        (READ_ONLY_TOOLS, {"readOnlyHint": True}),
+        (ADDITIVE_TOOLS, {"readOnlyHint": False, "destructiveHint": False}),
+        (LOCAL_ONLY_TOOLS if local_files else [], {"readOnlyHint": False, "destructiveHint": False}),
+        (DESTRUCTIVE_TOOLS, {"readOnlyHint": False, "destructiveHint": True}),
+    ]
+    for tools, annotations in groups:
+        for fn in tools:
+            if fn.__name__ not in disabled:
+                mcp.tool(annotations=annotations)(fn)
