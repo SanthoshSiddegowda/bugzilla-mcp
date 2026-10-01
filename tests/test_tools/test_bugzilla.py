@@ -197,6 +197,7 @@ class TestBugsQuicksearchTool:
         assert params["limit"] == 10
         assert params["offset"] == 5
         assert params["quicksearch"] == "test"
+        assert call_args.kwargs["headers"] == {"X-BUGZILLA-API-KEY": "test-api-key"}
 
     async def test_bugs_quicksearch_raises_on_missing_client(self, reset_bugzilla_client):
         """Test bugs_quicksearch raises ToolError when client not initialized"""

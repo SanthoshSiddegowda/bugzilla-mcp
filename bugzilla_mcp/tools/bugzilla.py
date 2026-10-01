@@ -9,11 +9,12 @@ import bugzilla_mcp.utils as utils
 async def bug_info(id: int) -> dict[str, Any]:
     """Returns the entire information about a given bugzilla bug id"""
 
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
 
     try:
-        return await utils.bz.bug_info(id)
+        return await bz.bug_info(id)
 
     except Exception as e:
         raise ToolError(f"Failed to fetch bug info\nReason: {e}")
@@ -25,11 +26,12 @@ async def bug_comments(id: int, include_private_comments: bool = False):
     but can be explicitely requested
     """
 
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
 
     try:
-        all_comments = await utils.bz.bug_comments(id)
+        all_comments = await bz.bug_comments(id)
 
         if include_private_comments:
             return all_comments
@@ -48,11 +50,12 @@ async def bug_comments(id: int, include_private_comments: bool = False):
 
 async def add_comment(bug_id: int, comment: str, is_private: bool = False) -> dict[str, int]:
     """Add a comment to a bug. It can optionally be private. If success, returns the created comment id."""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     
     try:
-        return await utils.bz.add_comment(bug_id, comment, is_private)
+        return await bz.add_comment(bug_id, comment, is_private)
     except Exception as e:
         raise ToolError(f"Failed to create a comment\n{e}")
 
@@ -65,15 +68,14 @@ async def bugs_quicksearch(query: str, limit: int = 50, offset: int = 0) -> list
     The user can query full details of each bug using the bug_info tool
     """
 
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
 
-    tool_params = utils.bz.params.copy()
-    tool_params["quicksearch"] = query
-    tool_params["limit"] = limit
-    tool_params["offset"] = offset
+    headers, tool_params = await bz.auth()
+    tool_params.update({"quicksearch": query, "limit": limit, "offset": offset})
 
-    r = await utils.bz.client.get(f"{utils.bz.api_url}/bug", params=tool_params)
+    r = await bz.client.get(f"{bz.api_url}/bug", headers=headers, params=tool_params)
 
     if r.status_code != 200:
         raise ToolError(f"Search failed with status code {r.status_code}")
@@ -103,11 +105,12 @@ async def learn_quicksearch_syntax() -> str:
     """Access the documentation of the bugzilla quicksearch syntax.
     LLM can learn using this tool. Response is in HTML"""
 
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
 
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{utils.bz.base_url}/page.cgi?id=quicksearch.html")
+        r = await client.get(f"{bz.base_url}/page.cgi?id=quicksearch.html")
 
         if r.status_code != 200:
             raise PromptError(
@@ -119,16 +122,18 @@ async def learn_quicksearch_syntax() -> str:
 
 async def server_url() -> str:
     """bugzilla server's base url"""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
-    return utils.bz.base_url
+    return bz.base_url
 
 
 async def bug_url(bug_id: int) -> str:
     """returns the bug url"""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
-    return f"{utils.bz.base_url}/show_bug.cgi?id={bug_id}"
+    return f"{bz.base_url}/show_bug.cgi?id={bug_id}"
 
 
 async def download_attachments(bug_id: int, dest_dir: str | None = None) -> list[dict[str, Any]]:
@@ -136,10 +141,11 @@ async def download_attachments(bug_id: int, dest_dir: str | None = None) -> list
 
     If dest_dir is not provided, a local 'tmp' directory in the project root is used.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.download_attachments(bug_id, dest_dir)
+        return await bz.download_attachments(bug_id, dest_dir)
     except Exception as e:
         raise ToolError(f"Failed to download attachments\nReason: {e}")
 
@@ -149,40 +155,44 @@ async def download_attachment(attachment_id: int, dest_dir: str | None = None) -
 
     If dest_dir is not provided, a local 'tmp' directory in the project root is used.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.download_attachment(attachment_id, dest_dir)
+        return await bz.download_attachment(attachment_id, dest_dir)
     except Exception as e:
         raise ToolError(f"Failed to download attachment\nReason: {e}")
 
 
 async def bugs_info(ids: list[int]) -> list[dict[str, Any]]:
     """Get information about multiple bugs in a single request."""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bugs_info(ids)
+        return await bz.bugs_info(ids)
     except Exception as e:
         raise ToolError(f"Failed to fetch batch bug info\nReason: {e}")
 
 
 async def bugs_comments(ids: list[int]) -> dict[str, list[dict[str, Any]]]:
     """Fetch comments for multiple bugs in parallel."""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bugs_comments(ids)
+        return await bz.bugs_comments(ids)
     except Exception as e:
         raise ToolError(f"Failed to fetch batch comments\nReason: {e}")
 
 
 async def bugs_analysis_context(ids: list[int]) -> dict[str, Any]:
     """Get consolidated prompt-friendly context (info + comments preview) for multiple bugs in parallel."""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bugs_analysis_context(ids)
+        return await bz.bugs_analysis_context(ids)
     except Exception as e:
         raise ToolError(f"Failed to fetch bugs analysis context\nReason: {e}")
 
@@ -192,10 +202,11 @@ async def classify_bugs_heuristics(ids: list[int]) -> dict[str, Any]:
 
     Analyzes status, resolution, summaries, and activity in parallel to deliver instant automated triage.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        info_list = await utils.bz.bugs_info(ids)
+        info_list = await bz.bugs_info(ids)
 
         to_fix = []
         invalid = []
@@ -261,10 +272,11 @@ async def analyze_bugs_statistics(ids: list[int]) -> dict[str, Any]:
     Returns breakdown of classifications, product distribution, component distribution,
     severity, priority workload, and assignee distribution with both counts and percentages.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bugs_stats_analysis(ids)
+        return await bz.bugs_stats_analysis(ids)
     except Exception as e:
         raise ToolError(f"Failed to perform statistical analysis\nReason: {e}")
 
@@ -285,10 +297,11 @@ async def create_bug(
 
     Returns the ID of the newly created bug.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.create_bug(
+        return await bz.create_bug(
             product=product,
             component=component,
             summary=summary,
@@ -338,10 +351,11 @@ async def update_bug(
 
     To mark as duplicate set resolution='DUPLICATE' and dupe_of=<original_bug_id>.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.update_bug(
+        return await bz.update_bug(
             ids=ids,
             status=status,
             resolution=resolution,
@@ -378,10 +392,11 @@ async def bug_history(bug_id: int, new_since: str | None = None) -> list[dict[st
     Use new_since (ISO datetime, e.g. '2024-01-01T00:00:00Z') to filter
     to only changes after a specific date. Returns who changed what and when.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bug_history(bug_id=bug_id, new_since=new_since)
+        return await bz.bug_history(bug_id=bug_id, new_since=new_since)
     except Exception as e:
         raise ToolError(f"Failed to fetch bug history\nReason: {e}")
 
@@ -411,10 +426,11 @@ async def bugs_advanced_search(
 
     Returns token-efficient results with essential fields only.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bugs_advanced_search(
+        return await bz.bugs_advanced_search(
             product=product,
             component=component,
             status=status,
@@ -437,10 +453,11 @@ async def bugs_advanced_search(
 
 async def bug_dependencies(bug_id: int) -> dict[str, Any]:
     """Get the dependency graph for a bug — which bugs it blocks and which it depends on."""
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.bug_dependencies(bug_id=bug_id)
+        return await bz.bug_dependencies(bug_id=bug_id)
     except Exception as e:
         raise ToolError(f"Failed to fetch bug dependencies\nReason: {e}")
 
@@ -451,10 +468,11 @@ async def duplicate_chain(bug_id: int, max_depth: int = 10) -> list[dict[str, An
     Returns an ordered list from the given bug to the root original,
     each entry with id, summary, status, and dupe_of.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.duplicate_chain(bug_id=bug_id, max_depth=max_depth)
+        return await bz.duplicate_chain(bug_id=bug_id, max_depth=max_depth)
     except Exception as e:
         raise ToolError(f"Failed to traverse duplicate chain\nReason: {e}")
 
@@ -467,10 +485,11 @@ async def get_user(
     Provide either names (list of login emails) or ids (list of user IDs).
     Returns user details including real_name, email, and can_login.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.get_user(names=names, ids=ids)
+        return await bz.get_user(names=names, ids=ids)
     except Exception as e:
         raise ToolError(f"Failed to fetch user info\nReason: {e}")
 
@@ -480,10 +499,11 @@ async def search_users(match: str, limit: int = 10) -> list[dict[str, Any]]:
 
     Returns matching users for auto-suggest, assignment, and CC workflows.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.search_users(match=match, limit=limit)
+        return await bz.search_users(match=match, limit=limit)
     except Exception as e:
         raise ToolError(f"Failed to search users\nReason: {e}")
 
@@ -494,10 +514,11 @@ async def list_products() -> list[dict[str, Any]]:
     Returns product names, descriptions, and active status.
     Useful for discovering valid products before filing a bug.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.list_products()
+        return await bz.list_products()
     except Exception as e:
         raise ToolError(f"Failed to list products\nReason: {e}")
 
@@ -508,10 +529,11 @@ async def get_product_components(product_name: str) -> dict[str, Any]:
     Returns component names, descriptions, and default assignee for each,
     enabling accurate bug routing before filing.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.get_product_components(product_name=product_name)
+        return await bz.get_product_components(product_name=product_name)
     except Exception as e:
         raise ToolError(f"Failed to fetch product components\nReason: {e}")
 
@@ -533,10 +555,11 @@ async def upload_attachment(
 
     Returns the attachment_id and bug_id on success.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.upload_attachment(
+        return await bz.upload_attachment(
             bug_id=bug_id,
             file_path=file_path,
             summary=summary,
@@ -559,10 +582,11 @@ async def tag_comment(
     Tags are useful for semantic labelling: e.g. 'fix-candidate', 'ai-generated',
     'reproduction', 'needs-review'. Returns the current list of tags on the comment.
     """
-    if utils.bz is None:
+    bz = utils.current_bz.get()
+    if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
     try:
-        return await utils.bz.tag_comment(comment_id=comment_id, add=add, remove=remove)
+        return await bz.tag_comment(comment_id=comment_id, add=add, remove=remove)
     except Exception as e:
         raise ToolError(f"Failed to tag comment\nReason: {e}")
 

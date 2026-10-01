@@ -13,7 +13,7 @@ class TestBugzillaBugsInfo:
         """Test successful batch bugs info retrieval"""
         bug_ids = [12345, 12346]
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug?api_key=test-key&id=12345%2C12346",
+            url="https://bugzilla.mozilla.org/rest/bug?id=12345%2C12346",
             json={
                 "bugs": [
                     {"id": 12345, "summary": "Bug 1", "status": "NEW"},
@@ -44,7 +44,7 @@ class TestBugzillaBugsInfo:
         """Test batch bugs info raises exception on non-200 status"""
         bug_ids = [12345]
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug?api_key=test-key&id=12345",
+            url="https://bugzilla.mozilla.org/rest/bug?id=12345",
             status_code=400,
         )
 
@@ -66,12 +66,12 @@ class TestBugzillaBugsComments:
         
         # Mock comments for bug 12345
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug/12345/comment?api_key=test-key",
+            url="https://bugzilla.mozilla.org/rest/bug/12345/comment",
             json={"bugs": {"12345": {"comments": [{"id": 1, "text": "Comment A"}]}}},
         )
         # Mock comments for bug 12346
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug/12346/comment?api_key=test-key",
+            url="https://bugzilla.mozilla.org/rest/bug/12346/comment",
             json={"bugs": {"12346": {"comments": [{"id": 2, "text": "Comment B"}]}}},
         )
 
@@ -102,7 +102,7 @@ class TestBugzillaBugsAnalysisContext:
 
         # Mock bug info
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug?api_key=test-key&id=12345",
+            url="https://bugzilla.mozilla.org/rest/bug?id=12345",
             json={
                 "bugs": [
                     {
@@ -118,7 +118,7 @@ class TestBugzillaBugsAnalysisContext:
 
         # Mock bug comments (more than 4 to trigger preview compression logic)
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug/12345/comment?api_key=test-key",
+            url="https://bugzilla.mozilla.org/rest/bug/12345/comment",
             json={
                 "bugs": {
                     "12345": {
@@ -170,7 +170,7 @@ class TestBugzillaBugsStatsAnalysis:
         bug_ids = [10001, 10002, 10003]
 
         httpx_mock.add_response(
-            url="https://bugzilla.mozilla.org/rest/bug?api_key=test-key&id=10001%2C10002%2C10003",
+            url="https://bugzilla.mozilla.org/rest/bug?id=10001%2C10002%2C10003",
             json={
                 "bugs": [
                     {

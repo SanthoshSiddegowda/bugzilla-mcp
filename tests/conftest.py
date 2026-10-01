@@ -4,6 +4,17 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 import bugzilla_mcp.utils as utils
 from bugzilla_mcp.utils import Bugzilla
+from bugzilla_mcp.utils import bugzilla as bugzilla_module
+
+
+@pytest.fixture(autouse=True)
+def header_auth_supported():
+    """Treat the test instance as one that reads the API key header (skips the probe)"""
+    bugzilla_module._header_auth_support.clear()
+    bugzilla_module._header_auth_support["https://bugzilla.mozilla.org"] = True
+    bugzilla_module._header_auth_support["https://bz.example.com"] = True
+    yield
+    bugzilla_module._header_auth_support.clear()
 
 
 # Sample bug data
@@ -141,7 +152,6 @@ def mock_bugzilla_client():
     client.base_url = "https://bugzilla.mozilla.org"
     client.api_url = "https://bugzilla.mozilla.org/rest"
     client.api_key = "test-api-key"
-    client.params = {"api_key": "test-api-key"}
     
     # Setup async mock methods
     client.bug_info = AsyncMock(return_value=SAMPLE_BUG)
@@ -189,6 +199,8 @@ def mock_bugzilla_client():
         "assignee_distribution": {"developer@example.com": {"count": 1, "percentage": 100.0}},
     })
     client.close = AsyncMock()
+    client.auth = AsyncMock(return_value=({"X-BUGZILLA-API-KEY": "test-api-key"}, {}))
+    
 
     # New tools mocks
     client.create_bug = AsyncMock(return_value={"id": 99999})
@@ -267,17 +279,15 @@ def mock_bugzilla_client():
 
 @pytest.fixture
 def set_bugzilla_client(mock_bugzilla_client):
-    """Set the global bugzilla client"""
-    original_bz = utils.bz
-    utils.bz = mock_bugzilla_client
+    """Set the current request's bugzilla client"""
+    token = utils.current_bz.set(mock_bugzilla_client)
     yield mock_bugzilla_client
-    utils.bz = original_bz
+    utils.current_bz.reset(token)
 
 
 @pytest.fixture
 def reset_bugzilla_client():
-    """Reset the global bugzilla client to None"""
-    original_bz = utils.bz
-    utils.bz = None
+    """Reset the current request's bugzilla client to None"""
+    token = utils.current_bz.set(None)
     yield
-    utils.bz = original_bz
+    utils.current_bz.reset(token)

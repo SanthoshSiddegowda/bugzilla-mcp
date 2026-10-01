@@ -1,27 +1,78 @@
 """Bugzilla API client"""
 
 import base64
+import logging
 import os
 from typing import Any
 import httpx
+
+logger = logging.getLogger(__name__)
+
+API_KEY_HEADER = "X-BUGZILLA-API-KEY"
+
+# Bugzilla base URL -> whether that instance reads the API key header.
+# Keyed by URL only (no secrets). Re-probed after a process restart.
+_header_auth_support: dict[str, bool] = {}
 
 
 class Bugzilla:
     """Bugzilla API class"""
 
     def __init__(self, url: str, api_key: str):
+        url = url.rstrip("/")
         self.api_url: str = url + "/rest"
         self.base_url: str = url
         self.api_key: str = api_key
-        # request params sent for each request
-        self.params: dict[str, Any] = {"api_key": self.api_key}
-        # Create a shared async client
         self.client: httpx.AsyncClient = httpx.AsyncClient()
+
+    async def supports_header_auth(self) -> bool:
+        """Check once per Bugzilla URL whether it reads the API key header.
+
+        Stock Bugzilla 5.0/5.2 ignore the header and only accept `?api_key=`;
+        bugzilla.mozilla.org and Bugzilla master read it. The probe sends a
+        deliberately invalid key in the header only: an instance that reads it
+        answers error 306 (invalid API key), one that ignores it doesn't.
+        """
+        if self.base_url not in _header_auth_support:
+            try:
+                r = await self.client.get(
+                    f"{self.api_url}/bug/1",
+                    params={"include_fields": "id"},
+                    headers={API_KEY_HEADER: "invalid-probe-key"},
+                )
+                supported = r.json().get("code") == 306
+            except (httpx.HTTPError, ValueError):
+                # Transient failure: use the query string this time, probe again next time
+                return False
+
+            _header_auth_support[self.base_url] = supported
+            if not supported:
+                logger.warning(
+                    "Bugzilla at %s does not accept the %s header; sending the API key "
+                    "in the query string instead. This fallback is deprecated: query "
+                    "strings can end up in access logs. Upgrade to a Bugzilla version "
+                    "that supports the header.",
+                    self.base_url,
+                    API_KEY_HEADER,
+                )
+
+        return _header_auth_support[self.base_url]
+
+    async def auth(self) -> tuple[dict[str, str], dict[str, str]]:
+        """Return (headers, params) that authenticate a request.
+
+        Prefer the header so the key stays out of URLs and access logs; fall
+        back to the query string (deprecated) for instances that ignore it.
+        """
+        if await self.supports_header_auth():
+            return {API_KEY_HEADER: self.api_key}, {}
+        return {}, {"api_key": self.api_key}
 
     async def bug_info(self, bug_id: int) -> dict[str, Any]:
         """get information about a given bug"""
 
-        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}", params=self.params)
+        headers, params = await self.auth()
+        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}", headers=headers, params=params)
 
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -33,7 +84,8 @@ class Bugzilla:
     async def bug_comments(self, bug_id: int) -> dict[str, Any]:
         """Get comments of a bug"""
 
-        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}/comment", params=self.params)
+        headers, params = await self.auth()
+        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}/comment", headers=headers, params=params)
 
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -49,8 +101,9 @@ class Bugzilla:
 
         c = {"comment": comment, "is_private": is_private}
 
+        headers, params = await self.auth()
         r = await self.client.post(
-            url=f"{self.api_url}/bug/{bug_id}/comment", params=self.params, json=c
+            url=f"{self.api_url}/bug/{bug_id}/comment", headers=headers, params=params, json=c
         )
 
         if r.status_code != 201:
@@ -74,8 +127,9 @@ class Bugzilla:
             A list of dicts containing attachment metadata and the local path:
             [{"id": 123, "file_name": "...", "path": "...", "size": 1024}]
         """
+        headers, params = await self.auth()
         r = await self.client.get(
-            url=f"{self.api_url}/bug/{bug_id}/attachment", params=self.params
+            url=f"{self.api_url}/bug/{bug_id}/attachment", headers=headers, params=params
         )
 
         if r.status_code != 200:
@@ -147,9 +201,10 @@ class Bugzilla:
             A dict containing attachment metadata and the local path:
             {"id": 123, "file_name": "...", "path": "...", "size": 1024}
         """
+        headers, params = await self.auth()
         r = await self.client.get(
             url=f"{self.api_url}/bug/attachment/{attachment_id}",
-            params=self.params,
+            headers=headers, params=params,
         )
 
         if r.status_code != 200:
@@ -208,10 +263,10 @@ class Bugzilla:
 
         # Join ids with commas
         ids_str = ",".join(map(str, bug_ids))
-        params = self.params.copy()
+        headers, params = await self.auth()
         params["id"] = ids_str
 
-        r = await self.client.get(url=f"{self.api_url}/bug", params=params)
+        r = await self.client.get(url=f"{self.api_url}/bug", headers=headers, params=params)
 
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -421,8 +476,9 @@ class Bugzilla:
         if target_milestone is not None:
             payload["target_milestone"] = target_milestone
 
+        headers, params = await self.auth()
         r = await self.client.post(
-            url=f"{self.api_url}/bug", params=self.params, json=payload
+            url=f"{self.api_url}/bug", headers=headers, params=params, json=payload
         )
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -513,8 +569,9 @@ class Bugzilla:
 
         # Bugzilla REST update accepts the first id in the URL
         bug_id = ids[0]
+        headers, params = await self.auth()
         r = await self.client.put(
-            url=f"{self.api_url}/bug/{bug_id}", params=self.params, json=payload
+            url=f"{self.api_url}/bug/{bug_id}", headers=headers, params=params, json=payload
         )
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -534,12 +591,12 @@ class Bugzilla:
         Returns:
             List of history objects with when/who/changes.
         """
-        params = dict(self.params)
+        headers, params = await self.auth()
         if new_since is not None:
             params["new_since"] = new_since
 
         r = await self.client.get(
-            url=f"{self.api_url}/bug/{bug_id}/history", params=params
+            url=f"{self.api_url}/bug/{bug_id}/history", headers=headers, params=params
         )
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -571,7 +628,7 @@ class Bugzilla:
         Returns:
             List of bug dicts with essential fields only to preserve token budget.
         """
-        params: dict[str, Any] = dict(self.params)
+        headers, params = await self.auth()
         params["limit"] = limit
         params["offset"] = offset
 
@@ -602,7 +659,7 @@ class Bugzilla:
         if target_milestone:
             params["target_milestone"] = target_milestone
 
-        r = await self.client.get(url=f"{self.api_url}/bug", params=params)
+        r = await self.client.get(url=f"{self.api_url}/bug", headers=headers, params=params)
         if r.status_code != 200:
             raise httpx.TransportError(
                 f"Failed to search bugs with Status code: {r.status_code}"
@@ -623,7 +680,8 @@ class Bugzilla:
         Returns:
             {"id": ..., "blocks": [...], "depends_on": [...]}
         """
-        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}", params=self.params)
+        headers, params = await self.auth()
+        r = await self.client.get(url=f"{self.api_url}/bug/{bug_id}", headers=headers, params=params)
         if r.status_code != 200:
             raise httpx.TransportError(
                 f"Failed to fetch bug with Status code: {r.status_code}"
@@ -659,8 +717,9 @@ class Bugzilla:
                 break
             visited.add(current_id)
 
+            headers, params = await self.auth()
             r = await self.client.get(
-                url=f"{self.api_url}/bug/{current_id}", params=self.params
+                url=f"{self.api_url}/bug/{current_id}", headers=headers, params=params
             )
             if r.status_code != 200:
                 raise httpx.TransportError(
@@ -688,13 +747,13 @@ class Bugzilla:
         Returns:
             List of user objects with id, real_name, name, email, can_login.
         """
-        params: dict[str, Any] = dict(self.params)
+        headers, params = await self.auth()
         if names:
             params["names"] = names
         if ids:
             params["ids"] = ids
 
-        r = await self.client.get(url=f"{self.api_url}/user", params=params)
+        r = await self.client.get(url=f"{self.api_url}/user", headers=headers, params=params)
         if r.status_code != 200:
             raise httpx.TransportError(
                 f"Failed to fetch users with Status code: {r.status_code}"
@@ -707,11 +766,11 @@ class Bugzilla:
         Returns:
             List of matching user objects.
         """
-        params: dict[str, Any] = dict(self.params)
+        headers, params = await self.auth()
         params["match"] = match
         params["limit"] = limit
 
-        r = await self.client.get(url=f"{self.api_url}/user", params=params)
+        r = await self.client.get(url=f"{self.api_url}/user", headers=headers, params=params)
         if r.status_code != 200:
             raise httpx.TransportError(
                 f"Failed to search users with Status code: {r.status_code}"
@@ -725,8 +784,9 @@ class Bugzilla:
             List of product objects with id, name, description, is_active.
         """
         # First get accessible product IDs, then fetch their details
+        headers, params = await self.auth()
         r = await self.client.get(
-            url=f"{self.api_url}/product_accessible", params=self.params
+            url=f"{self.api_url}/product_accessible", headers=headers, params=params
         )
         if r.status_code != 200:
             raise httpx.TransportError(
@@ -736,9 +796,9 @@ class Bugzilla:
         if not ids:
             return []
 
-        params: dict[str, Any] = dict(self.params)
+        headers, params = await self.auth()
         params["ids"] = ids
-        r2 = await self.client.get(url=f"{self.api_url}/product", params=params)
+        r2 = await self.client.get(url=f"{self.api_url}/product", headers=headers, params=params)
         if r2.status_code != 200:
             raise httpx.TransportError(
                 f"Failed to fetch product details with Status code: {r2.status_code}"
@@ -762,10 +822,10 @@ class Bugzilla:
         Returns:
             {"name": "...", "components": [{"name", "description", "default_assignee"}, ...]}
         """
-        params: dict[str, Any] = dict(self.params)
+        headers, params = await self.auth()
         params["names"] = product_name
 
-        r = await self.client.get(url=f"{self.api_url}/product", params=params)
+        r = await self.client.get(url=f"{self.api_url}/product", headers=headers, params=params)
         if r.status_code != 200:
             raise httpx.TransportError(
                 f"Failed to fetch product with Status code: {r.status_code}"
@@ -830,9 +890,10 @@ class Bugzilla:
         if comment is not None:
             payload["comment"] = comment
 
+        headers, params = await self.auth()
         r = await self.client.post(
             url=f"{self.api_url}/bug/{bug_id}/attachment",
-            params=self.params,
+            headers=headers, params=params,
             json=payload,
         )
         if r.status_code != 201:
@@ -858,9 +919,10 @@ class Bugzilla:
         if remove:
             payload["remove"] = remove
 
+        headers, params = await self.auth()
         r = await self.client.put(
             url=f"{self.api_url}/bug/comment/{comment_id}/tags",
-            params=self.params,
+            headers=headers, params=params,
             json=payload,
         )
         if r.status_code != 200:

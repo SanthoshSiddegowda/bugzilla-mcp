@@ -42,7 +42,9 @@ BUGZILLA_API_KEY = os.environ.get("BUGZILLA_API_KEY", "")
 if not BUGZILLA_URL or not BUGZILLA_API_KEY:
     raise RuntimeError("BUGZILLA_URL and BUGZILLA_API_KEY env vars are required")
 
-utils.bz = Bugzilla(url=BUGZILLA_URL, api_key=BUGZILLA_API_KEY)
+# Single-user process: one client for the whole session.
+# asyncio.run copies this context into the server's tasks, so every tool sees it.
+utils.current_bz.set(Bugzilla(url=BUGZILLA_URL, api_key=BUGZILLA_API_KEY))
 
 mcp = FastMCP("Bugzilla")
 

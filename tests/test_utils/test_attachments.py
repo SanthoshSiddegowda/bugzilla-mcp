@@ -20,7 +20,7 @@ class TestBugzillaDownloadAttachments:
         b64_data = base64.b64encode(file_content).decode("utf-8")
 
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment",
             json={
                 "bugs": {
                     str(bug_id): [
@@ -63,7 +63,7 @@ class TestBugzillaDownloadAttachments:
         """Test download when there are no attachments"""
         bug_id = 12345
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment",
             json={"bugs": {str(bug_id): []}},
         )
 
@@ -79,7 +79,7 @@ class TestBugzillaDownloadAttachments:
         """Test download raises exception on non-200 status"""
         bug_id = 99999
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment",
             status_code=500,
         )
 
@@ -95,7 +95,7 @@ class TestBugzillaDownloadAttachments:
         """Test download raises exception on invalid base64 data"""
         bug_id = 12345
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/{bug_id}/attachment",
             json={
                 "bugs": {
                     str(bug_id): [
@@ -131,7 +131,7 @@ class TestBugzillaDownloadAttachment:
         b64_data = base64.b64encode(file_content).decode("utf-8")
 
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}",
             json={
                 "attachments": {
                     str(att_id): {
@@ -170,7 +170,7 @@ class TestBugzillaDownloadAttachment:
         """Test download raises exception on non-200 status"""
         att_id = 99999
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}",
             status_code=404,
         )
 
@@ -186,7 +186,7 @@ class TestBugzillaDownloadAttachment:
         """Test download raises ValueError when attachment not found in response"""
         att_id = 9001
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}",
             json={"attachments": {}},
         )
 
@@ -202,7 +202,7 @@ class TestBugzillaDownloadAttachment:
         """Test download raises ValueError when no data field present"""
         att_id = 9001
         httpx_mock.add_response(
-            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}?api_key=test-key",
+            url=f"https://bugzilla.mozilla.org/rest/bug/attachment/{att_id}",
             json={
                 "attachments": {
                     str(att_id): {
