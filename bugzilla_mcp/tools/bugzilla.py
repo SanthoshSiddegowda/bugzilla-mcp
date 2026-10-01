@@ -72,9 +72,10 @@ async def bugs_quicksearch(query: str, limit: int = 50, offset: int = 0) -> list
     if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
 
-    tool_params = {"quicksearch": query, "limit": limit, "offset": offset}
+    headers, tool_params = await bz.auth()
+    tool_params.update({"quicksearch": query, "limit": limit, "offset": offset})
 
-    r = await bz.client.get(f"{bz.api_url}/bug", params=tool_params)
+    r = await bz.client.get(f"{bz.api_url}/bug", headers=headers, params=tool_params)
 
     if r.status_code != 200:
         raise ToolError(f"Search failed with status code {r.status_code}")

@@ -4,6 +4,16 @@ import json
 import pytest
 import httpx
 from bugzilla_mcp.utils import Bugzilla
+from bugzilla_mcp.utils import bugzilla as bugzilla_module
+
+
+@pytest.fixture(autouse=True)
+def header_auth_supported():
+    """Treat the test instance as one that reads the API key header (skips the probe)"""
+    bugzilla_module._header_auth_support.clear()
+    bugzilla_module._header_auth_support["https://bugzilla.mozilla.org"] = True
+    yield
+    bugzilla_module._header_auth_support.clear()
 
 
 class TestBugzillaInit:
@@ -24,10 +34,6 @@ class TestBugzillaInit:
         bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="my-api-key")
         assert bz.api_key == "my-api-key"
 
-    def test_init_sends_api_key_as_header(self):
-        """Test that the API key is sent as a header, not a query param"""
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="my-api-key")
-        assert bz.client.headers["X-BUGZILLA-API-KEY"] == "my-api-key"
 
     def test_init_strips_trailing_slash(self):
         """Test that a trailing slash does not produce '//rest'"""
@@ -278,3 +284,61 @@ class TestBugzillaClose:
         
         # Client should be closed - verify using the client's is_closed property
         assert bz.client.is_closed is True
+
+
+class TestBugzillaAuth:
+    """API key goes in the header where supported, query string otherwise"""
+
+    URL = "https://legacy.example.com"
+    PROBE = "https://legacy.example.com/rest/bug/1?include_fields=id"
+
+    @pytest.fixture(autouse=True)
+    def unknown_instance(self):
+        bugzilla_module._header_auth_support.pop(self.URL, None)
+        yield
+        bugzilla_module._header_auth_support.pop(self.URL, None)
+
+    async def test_uses_header_when_instance_reads_it(self, httpx_mock):
+        httpx_mock.add_response(url=self.PROBE, json={"error": True, "code": 306})
+        bz = Bugzilla(url=self.URL, api_key="secret")
+
+        assert await bz.auth() == ({"X-BUGZILLA-API-KEY": "secret"}, {})
+        # cached: second call doesn't probe again
+        assert await bz.auth() == ({"X-BUGZILLA-API-KEY": "secret"}, {})
+        assert len(httpx_mock.get_requests()) == 1
+
+    async def test_probe_never_sends_real_key(self, httpx_mock):
+        httpx_mock.add_response(url=self.PROBE, json={"error": True, "code": 306})
+        await Bugzilla(url=self.URL, api_key="secret").auth()
+
+        probe = httpx_mock.get_requests()[0]
+        assert "secret" not in str(probe.url)
+        assert probe.headers["X-BUGZILLA-API-KEY"] != "secret"
+
+    async def test_falls_back_to_query_when_header_ignored(self, httpx_mock, caplog):
+        """Stock Bugzilla 5.x ignores the header and answers anonymously"""
+        httpx_mock.add_response(url=self.PROBE, json={"bugs": [{"id": 1}], "faults": []})
+        bz = Bugzilla(url=self.URL, api_key="secret")
+
+        assert await bz.auth() == ({}, {"api_key": "secret"})
+        assert "deprecated" in caplog.text
+
+    async def test_falls_back_to_query_when_login_required(self, httpx_mock):
+        """Instances with requirelogin answer 410 when the header is ignored"""
+        httpx_mock.add_response(url=self.PROBE, status_code=401, json={"error": True, "code": 410})
+        assert await Bugzilla(url=self.URL, api_key="secret").auth() == ({}, {"api_key": "secret"})
+
+    async def test_probe_failure_falls_back_without_caching(self, httpx_mock):
+        httpx_mock.add_exception(httpx.ConnectError("down"), url=self.PROBE)
+        bz = Bugzilla(url=self.URL, api_key="secret")
+
+        assert await bz.auth() == ({}, {"api_key": "secret"})
+        assert self.URL not in bugzilla_module._header_auth_support
+
+    async def test_bug_info_uses_query_on_legacy_instance(self, httpx_mock):
+        httpx_mock.add_response(url=self.PROBE, json={"bugs": [{"id": 1}]})
+        httpx_mock.add_response(
+            url="https://legacy.example.com/rest/bug/7?api_key=secret",
+            json={"bugs": [{"id": 7}]},
+        )
+        assert (await Bugzilla(url=self.URL, api_key="secret").bug_info(7))["id"] == 7

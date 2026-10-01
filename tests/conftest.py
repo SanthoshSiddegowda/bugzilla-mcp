@@ -110,6 +110,7 @@ def mock_bugzilla_client():
     client.bug_comments = AsyncMock(return_value=SAMPLE_COMMENTS)
     client.add_comment = AsyncMock(return_value=SAMPLE_ADD_COMMENT_RESPONSE)
     client.close = AsyncMock()
+    client.auth = AsyncMock(return_value=({"X-BUGZILLA-API-KEY": "test-api-key"}, {}))
     
     # Mock the httpx client
     client.client = MagicMock()
