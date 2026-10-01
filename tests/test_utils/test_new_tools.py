@@ -18,7 +18,7 @@ def _make_response(status_code: int, json_body: dict) -> MagicMock:
 
 @pytest.fixture
 def bz():
-    client = Bugzilla(url="https://bz.example.com", api_key="test-key")
+    client = Bugzilla(url="https://bz.example.com", api_key="test-key", allow_local_files=True)
     client.client = MagicMock()
     client.client.get = AsyncMock()
     client.client.post = AsyncMock()
