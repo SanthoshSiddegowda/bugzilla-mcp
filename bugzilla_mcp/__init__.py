@@ -27,6 +27,9 @@ from .tools.bugzilla import (
     get_product_components,
     upload_attachment,
     tag_comment,
+    bug_attachments,
+    get_attachment,
+    register_tools,
 )
 
 __all__ = [
@@ -56,4 +59,7 @@ __all__ = [
     "get_product_components",
     "upload_attachment",
     "tag_comment",
+    "bug_attachments",
+    "get_attachment",
+    "register_tools",
 ]

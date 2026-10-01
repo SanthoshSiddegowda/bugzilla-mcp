@@ -1,20 +1,35 @@
 """Bugzilla tools for MCP server"""
 
+import base64
+import json
 import httpx
 from typing import Any
+from fastmcp.utilities.types import Image
+from mcp.types import TextContent
 from fastmcp.exceptions import ToolError, PromptError
 import bugzilla_mcp.utils as utils
 
 
-async def bug_info(id: int) -> dict[str, Any]:
-    """Returns the entire information about a given bugzilla bug id"""
+def _compact(bug: dict[str, Any]) -> dict[str, Any]:
+    """Drop empty fields (e.g. unused cf_* custom fields) to save tokens"""
+    return {k: v for k, v in bug.items() if v not in (None, "", [], {})}
+
+
+async def bug_info(id: int, full: bool = False) -> dict[str, Any]:
+    """Returns information about a given bugzilla bug id.
+
+    Empty fields are left out by default; pass full=True for every field.
+    """
 
     bz = utils.current_bz.get()
     if bz is None:
         raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
 
     try:
-        return await bz.bug_info(id)
+        bug = await bz.bug_info(id)
+        # update_token is a form/CSRF token: no use to an assistant
+        bug.pop("update_token", None)
+        return bug if full else _compact(bug)
 
     except Exception as e:
         raise ToolError(f"Failed to fetch bug info\nReason: {e}")
@@ -140,6 +155,7 @@ async def download_attachments(bug_id: int, dest_dir: str | None = None) -> list
     """Download all attachments for a specific bug to a temporary directory.
 
     If dest_dir is not provided, a local 'tmp' directory in the project root is used.
+    Local server only: on the hosted server use bug_attachments / get_attachment.
     """
     bz = utils.current_bz.get()
     if bz is None:
@@ -154,6 +170,7 @@ async def download_attachment(attachment_id: int, dest_dir: str | None = None) -
     """Download a specific attachment by its ID.
 
     If dest_dir is not provided, a local 'tmp' directory in the project root is used.
+    Local server only: on the hosted server use bug_attachments / get_attachment.
     """
     bz = utils.current_bz.get()
     if bz is None:
@@ -540,18 +557,23 @@ async def get_product_components(product_name: str) -> dict[str, Any]:
 
 async def upload_attachment(
     bug_id: int,
-    file_path: str,
     summary: str,
+    text: str | None = None,
+    data_base64: str | None = None,
     file_name: str | None = None,
     content_type: str | None = None,
     comment: str | None = None,
     is_patch: bool = False,
+    file_path: str | None = None,
 ) -> dict[str, Any]:
-    """Upload a local file as an attachment to a bug.
+    """Attach content to a bug.
 
-    Reads the file, base64-encodes it, and posts it to the Bugzilla REST API.
-    Content-type is auto-detected from the file extension if not provided.
-    Set is_patch=True for patch/diff files.
+    Pass exactly one of:
+    - text: plain text such as a log or a patch (file_name defaults to attachment.txt)
+    - data_base64: base64-encoded file content (file_name required)
+    - file_path: path to a file on the server's machine; local server only
+
+    Content-type is auto-detected if not provided. Set is_patch=True for patch/diff files.
 
     Returns the attachment_id and bug_id on success.
     """
@@ -567,6 +589,8 @@ async def upload_attachment(
             content_type=content_type,
             comment=comment,
             is_patch=is_patch,
+            text=text,
+            data_base64=data_base64,
         )
     except Exception as e:
         raise ToolError(f"Failed to upload attachment\nReason: {e}")
@@ -591,4 +615,89 @@ async def tag_comment(
         raise ToolError(f"Failed to tag comment\nReason: {e}")
 
 
+# Attachments bigger than this aren't inlined into the assistant's context
+MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
+TEXT_CONTENT_TYPES = (
+    "text/",
+    "application/json",
+    "application/xml",
+    "application/x-patch",
+    "application/x-diff",
+)
+
+
+async def bug_attachments(bug_id: int) -> list[dict[str, Any]]:
+    """List a bug's attachments (id, file name, content type, size, flags) without file data.
+
+    Use get_attachment with an id from this list to read one.
+    """
+    bz = utils.current_bz.get()
+    if bz is None:
+        raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
+    try:
+        return await bz.bug_attachments(bug_id)
+    except Exception as e:
+        raise ToolError(f"Failed to list attachments\nReason: {e}")
+
+
+async def get_attachment(attachment_id: int):
+    """Read one attachment.
+
+    Images are returned as images, text files and patches as text. Other
+    binary files and files over 10 MB return metadata and a link only.
+    """
+    bz = utils.current_bz.get()
+    if bz is None:
+        raise ToolError("Bugzilla client not initialized. Please ensure api_key and bugzilla_url headers are provided.")
+    try:
+        att = await bz.get_attachment(attachment_id)
+        raw = base64.b64decode(att.get("data") or "")
+    except Exception as e:
+        raise ToolError(f"Failed to fetch attachment\nReason: {e}")
+
+    meta = _compact({k: att.get(k) for k in (
+        "id", "bug_id", "file_name", "summary", "content_type", "size",
+        "creator", "creation_time", "is_patch", "is_obsolete",
+    )})
+    content_type = att.get("content_type") or ""
+    link = f"{bz.base_url}/attachment.cgi?id={attachment_id}"
+
+    def text(value) -> TextContent:
+        return TextContent(type="text", text=value if isinstance(value, str) else json.dumps(value))
+
+    # Explicit content blocks: fastmcp would otherwise serialize a mixed list as one JSON string
+    if len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
+        return [text({**meta, "note": "Too large to show inline; open the link", "url": link})]
+    if content_type.startswith("image/"):
+        image = Image(data=raw, format=content_type.split("/", 1)[1])
+        return [text(meta), image.to_image_content()]
+    if att.get("is_patch") or content_type.startswith(TEXT_CONTENT_TYPES):
+        return [text(meta), text(raw.decode("utf-8", errors="replace"))]
+    return [text({**meta, "note": "Binary file; open the link to download it", "url": link})]
+
+
+READ_ONLY_TOOLS = [
+    bug_info, bug_comments, bugs_quicksearch, learn_quicksearch_syntax, server_url,
+    bug_url, bug_attachments, get_attachment, bugs_info, bugs_comments,
+    bugs_analysis_context, classify_bugs_heuristics, analyze_bugs_statistics,
+    bug_history, bugs_advanced_search, bug_dependencies, duplicate_chain, get_user,
+    search_users, list_products, get_product_components,
+]
+# Add to Bugzilla (or, locally, write files) without changing existing data
+ADDITIVE_TOOLS = [
+    add_comment, create_bug, upload_attachment, tag_comment,
+    download_attachments, download_attachment,
+]
+# Change existing bugs: status, assignee, product, ...
+DESTRUCTIVE_TOOLS = [update_bug]
+
+
+def register_tools(mcp) -> None:
+    """Register every tool with hints so clients can ask before writes"""
+    for fn in READ_ONLY_TOOLS:
+        mcp.tool(annotations={"readOnlyHint": True})(fn)
+    for fn in ADDITIVE_TOOLS:
+        mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})(fn)
+    for fn in DESTRUCTIVE_TOOLS:
+        mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True})(fn)

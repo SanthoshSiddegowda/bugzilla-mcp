@@ -37,7 +37,7 @@ class TestBugzillaDownloadAttachments:
             },
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             result = await bz.download_attachments(bug_id, dest_dir=tmp_dir)
@@ -67,7 +67,7 @@ class TestBugzillaDownloadAttachments:
             json={"bugs": {str(bug_id): []}},
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             result = await bz.download_attachments(bug_id, dest_dir=tmp_dir)
@@ -83,7 +83,7 @@ class TestBugzillaDownloadAttachments:
             status_code=500,
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with pytest.raises(httpx.TransportError) as exc_info:
             await bz.download_attachments(bug_id)
@@ -109,7 +109,7 @@ class TestBugzillaDownloadAttachments:
             },
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             with pytest.raises(ValueError) as exc_info:
@@ -146,7 +146,7 @@ class TestBugzillaDownloadAttachment:
             },
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             att = await bz.download_attachment(att_id, dest_dir=tmp_dir)
@@ -174,7 +174,7 @@ class TestBugzillaDownloadAttachment:
             status_code=404,
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with pytest.raises(httpx.TransportError) as exc_info:
             await bz.download_attachment(att_id)
@@ -190,7 +190,7 @@ class TestBugzillaDownloadAttachment:
             json={"attachments": {}},
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with pytest.raises(ValueError) as exc_info:
             await bz.download_attachment(att_id)
@@ -213,7 +213,7 @@ class TestBugzillaDownloadAttachment:
             },
         )
 
-        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key", allow_local_files=True)
 
         with pytest.raises(ValueError) as exc_info:
             await bz.download_attachment(att_id)

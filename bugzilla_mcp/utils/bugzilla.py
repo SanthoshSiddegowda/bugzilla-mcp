@@ -18,8 +18,12 @@ _header_auth_support: dict[str, bool] = {}
 class Bugzilla:
     """Bugzilla API class"""
 
-    def __init__(self, url: str, api_key: str):
+    def __init__(self, url: str, api_key: str, allow_local_files: bool = False):
+        """allow_local_files: let tools read/write the server's filesystem.
+        Only the single-user local server (server_local.py) enables it; on a
+        shared server it would let any caller read or overwrite server files."""
         url = url.rstrip("/")
+        self.allow_local_files: bool = allow_local_files
         self.api_url: str = url + "/rest"
         self.base_url: str = url
         self.api_key: str = api_key
@@ -113,6 +117,42 @@ class Bugzilla:
 
         return r.json()
 
+    def _require_local_files(self) -> None:
+        if not self.allow_local_files:
+            raise PermissionError(
+                "Reading or writing files on the server is only available in the local "
+                "server (server_local.py). Use get_attachment to read attachments, and "
+                "pass text or data_base64 to upload_attachment."
+            )
+
+    async def bug_attachments(self, bug_id: int) -> list[dict[str, Any]]:
+        """List a bug's attachments (metadata only, no file data)"""
+        headers, params = await self.auth()
+        params["exclude_fields"] = "data"
+        r = await self.client.get(
+            url=f"{self.api_url}/bug/{bug_id}/attachment", headers=headers, params=params
+        )
+        if r.status_code != 200:
+            raise httpx.TransportError(
+                f"Failed to fetch API with Status code: {r.status_code}"
+            )
+        return r.json().get("bugs", {}).get(str(bug_id), [])
+
+    async def get_attachment(self, attachment_id: int) -> dict[str, Any]:
+        """Fetch one attachment including its base64 `data`"""
+        headers, params = await self.auth()
+        r = await self.client.get(
+            url=f"{self.api_url}/bug/attachment/{attachment_id}", headers=headers, params=params
+        )
+        if r.status_code != 200:
+            raise httpx.TransportError(
+                f"Failed to fetch API with Status code: {r.status_code}"
+            )
+        att = r.json().get("attachments", {}).get(str(attachment_id))
+        if not att:
+            raise ValueError(f"Attachment {attachment_id} not found")
+        return att
+
     async def download_attachments(
         self, bug_id: int, dest_dir: str | None = None
     ) -> list[dict[str, Any]]:
@@ -127,6 +167,7 @@ class Bugzilla:
             A list of dicts containing attachment metadata and the local path:
             [{"id": 123, "file_name": "...", "path": "...", "size": 1024}]
         """
+        self._require_local_files()
         headers, params = await self.auth()
         r = await self.client.get(
             url=f"{self.api_url}/bug/{bug_id}/attachment", headers=headers, params=params
@@ -201,6 +242,7 @@ class Bugzilla:
             A dict containing attachment metadata and the local path:
             {"id": 123, "file_name": "...", "path": "...", "size": 1024}
         """
+        self._require_local_files()
         headers, params = await self.auth()
         r = await self.client.get(
             url=f"{self.api_url}/bug/attachment/{attachment_id}",
@@ -286,8 +328,8 @@ class Bugzilla:
             try:
                 comments = await self.bug_comments(bug_id)
                 return str(bug_id), comments
-            except Exception:
-                return str(bug_id), []
+            except Exception as e:
+                return str(bug_id), {"error": f"Failed to fetch comments: {e}"}
 
         tasks = [fetch_one(bid) for bid in bug_ids]
         results = await asyncio.gather(*tasks)
@@ -480,7 +522,8 @@ class Bugzilla:
         r = await self.client.post(
             url=f"{self.api_url}/bug", headers=headers, params=params, json=payload
         )
-        if r.status_code != 200:
+        # Bugzilla answers 201 Created; accept 200 too for forks that differ
+        if r.status_code not in (200, 201):
             raise httpx.TransportError(
                 f"Failed to create bug with Status code: {r.status_code} — {r.text}"
             )
@@ -848,33 +891,50 @@ class Bugzilla:
     async def upload_attachment(
         self,
         bug_id: int,
-        file_path: str,
-        summary: str,
+        file_path: str | None = None,
+        summary: str = "",
         file_name: str | None = None,
         content_type: str | None = None,
         comment: str | None = None,
         is_patch: bool = False,
+        text: str | None = None,
+        data_base64: str | None = None,
     ) -> dict[str, Any]:
-        """Upload a local file as an attachment to a bug via POST /rest/bug/(id)/attachment.
+        """Attach content to a bug via POST /rest/bug/(id)/attachment.
+
+        Pass exactly one of `text`, `data_base64` or (local server only) `file_path`.
 
         Returns:
             {"attachment_id": ..., "bug_id": ...}
         """
-        if not os.path.isfile(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+        if not summary:
+            raise ValueError("summary is required")
+        if sum(x is not None for x in (file_path, text, data_base64)) != 1:
+            raise ValueError("Pass exactly one of text, data_base64 or file_path")
 
-        final_name = file_name or os.path.basename(file_path)
-
-        with open(file_path, "rb") as fh:
-            raw = fh.read()
-
-        b64_data = base64.b64encode(raw).decode("utf-8")
+        if file_path is not None:
+            self._require_local_files()
+            if not os.path.isfile(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+            with open(file_path, "rb") as fh:
+                b64_data = base64.b64encode(fh.read()).decode("utf-8")
+            final_name = file_name or os.path.basename(file_path)
+        elif text is not None:
+            b64_data = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+            final_name = file_name or "attachment.txt"
+        else:
+            try:
+                base64.b64decode(data_base64, validate=True)
+            except ValueError:
+                raise ValueError("data_base64 is not valid base64")
+            b64_data = data_base64
+            if not file_name:
+                raise ValueError("file_name is required with data_base64")
+            final_name = file_name
 
         # Auto-detect content_type if not provided
         if content_type is None:
-            if is_patch or final_name.endswith(".patch") or final_name.endswith(".diff"):
-                content_type = "text/plain"
-            elif final_name.endswith(".txt"):
+            if is_patch or final_name.endswith((".patch", ".diff", ".txt")) or text is not None:
                 content_type = "text/plain"
             else:
                 content_type = "application/octet-stream"
@@ -893,17 +953,20 @@ class Bugzilla:
         headers, params = await self.auth()
         r = await self.client.post(
             url=f"{self.api_url}/bug/{bug_id}/attachment",
-            headers=headers, params=params,
+            headers=headers,
+            params=params,
             json=payload,
         )
-        if r.status_code != 201:
+
+        if r.status_code not in (200, 201):
             raise httpx.TransportError(
                 f"Failed to upload attachment with Status code: {r.status_code} — {r.text}"
             )
+
+        # Bugzilla returns {"ids": [<new attachment id>]}
         data = r.json()
-        attachments = data.get("attachments", {})
-        attachment_id = list(attachments.keys())[0] if attachments else None
-        return {"attachment_id": int(attachment_id) if attachment_id else None, "bug_id": bug_id}
+        ids = data.get("ids") or list(data.get("attachments", {}).keys())
+        return {"attachment_id": int(ids[0]) if ids else None, "bug_id": bug_id}
 
     async def tag_comment(
         self, comment_id: int, add: list[str] | None = None, remove: list[str] | None = None

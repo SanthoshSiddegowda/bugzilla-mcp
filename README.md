@@ -10,15 +10,17 @@ A Model Context Protocol (MCP) server that enables secure interaction with Bugzi
 
 ## Features
 
-This MCP server provides a comprehensive interface for AI agents to interact with Bugzilla, exposing **26 specialized tools** categorized into:
+This MCP server provides a comprehensive interface for AI agents to interact with Bugzilla, exposing **28 specialized tools** categorized into:
 
 - **🔍 Advanced Search & Discovery**:
   - Full-text search with Bugzilla's fast `bugs_quicksearch` syntax.
   - Multi-criteria `bugs_advanced_search` (filter by product, component, status, severity, keywords, and more).
   - Browse accessible products (`list_products`) and component schemas (`get_product_components`).
+  - Read a bug (`bug_info`) in compact form by default: empty fields (e.g. unused `cf_*` custom fields) and the `update_token` are dropped. Pass `full=True` for every field.
 
 - **✏️ Write & Comprehensive Updates**:
   - File new bugs (`create_bug`) with assignees, keywords, severities, and descriptions.
+  - Tools carry MCP hints (`readOnlyHint` / `destructiveHint`), so clients can auto-approve reads and ask before `update_bug` changes a bug.
   - Atomically update any bug property (`update_bug`) — supports status, resolution, assignments, priority/severity, milestone, version, CC list, keywords, and any custom fields (e.g. `cf_qatouch_id`).
   - Append public or private comments (`add_comment`) and tag comments semantically (`tag_comment`).
 
@@ -28,8 +30,9 @@ This MCP server provides a comprehensive interface for AI agents to interact wit
   - Categorize bug batches automatically (`classify_bugs_heuristics`) and generate statistical metrics (`analyze_bugs_statistics`).
 
 - **📎 Robust Attachment Handling**:
-  - Download and decode all attachments or individual files (`download_attachments`, `download_attachment`) to a local workspace (`tmp/`).
-  - Upload local files or patches directly to Bugzilla (`upload_attachment`) with automatic content-type detection.
+  - List a bug's attachments (`bug_attachments`) and read one (`get_attachment`): screenshots come back as images, logs and patches as text.
+  - Attach logs, patches or files (`upload_attachment`) by passing `text` or `data_base64`, with automatic content-type detection.
+  - **Local server only** (`server_local.py`): save attachments to disk (`download_attachments`, `download_attachment`) and upload from a `file_path`. The hosted server refuses these so callers can't read or write files on the shared machine.
 
 - **👤 User Management & Auditing**:
   - Audit full change histories (`bug_history`) with time and field filters.
