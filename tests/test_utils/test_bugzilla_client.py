@@ -7,15 +7,6 @@ from bugzilla_mcp.utils import Bugzilla
 from bugzilla_mcp.utils import bugzilla as bugzilla_module
 
 
-@pytest.fixture(autouse=True)
-def header_auth_supported():
-    """Treat the test instance as one that reads the API key header (skips the probe)"""
-    bugzilla_module._header_auth_support.clear()
-    bugzilla_module._header_auth_support["https://bugzilla.mozilla.org"] = True
-    yield
-    bugzilla_module._header_auth_support.clear()
-
-
 class TestBugzillaInit:
     """Tests for Bugzilla class initialization"""
 

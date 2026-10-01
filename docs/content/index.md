@@ -102,6 +102,6 @@ Powerful features for bug tracking
   [Easy Integration]{.text-primary}
   
   #description
-  Works seamlessly with Claude Desktop, Cursor IDE, Visual Studio Code, and any MCP-compatible client. Simple JSON configuration.
+  Works seamlessly with Claude Code, Claude Desktop, Cursor IDE, Visual Studio Code, and any MCP-compatible client. Simple JSON configuration.
   :::
 ::
