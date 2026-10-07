@@ -28,7 +28,7 @@ Paste any error messages here
 
 ## Environment
 - Python version: [e.g. 3.13]
-- FastMCP version: [e.g. 2.12.5]
+- FastMCP version: [e.g. 4.0.11] (`uvx bugzilla-mcp --version` shows the server version)
 - Bugzilla instance URL: [e.g. https://bugzilla.example.com]
 - OS: [e.g. macOS, Linux, Windows]
 

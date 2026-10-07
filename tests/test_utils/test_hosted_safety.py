@@ -155,7 +155,7 @@ class TestGetAttachmentTool:
         set_bugzilla_client.get_attachment = AsyncMock(return_value=self._att("image/png", b"\x89PNG"))
         meta, image = await get_attachment(5)
         assert isinstance(image, ImageContent)
-        assert image.mimeType == "image/png"
+        assert image.mime_type == "image/png"
         assert base64.b64decode(image.data) == b"\x89PNG"
         assert json.loads(meta.text)["content_type"] == "image/png"
         assert "data" not in json.loads(meta.text)
@@ -189,9 +189,9 @@ class TestToolRegistration:
     async def test_annotations(self):
         mcp = FastMCP("t")
         register_tools(mcp)
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
 
         assert len(tools) == len(READ_ONLY_TOOLS) + len(ADDITIVE_TOOLS) + len(DESTRUCTIVE_TOOLS)
-        assert tools["bug_info"].annotations.readOnlyHint is True
-        assert tools["add_comment"].annotations.readOnlyHint is False
-        assert tools["update_bug"].annotations.destructiveHint is True
+        assert tools["bug_info"].annotations.read_only_hint is True
+        assert tools["add_comment"].annotations.read_only_hint is False
+        assert tools["update_bug"].annotations.destructive_hint is True

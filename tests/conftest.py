@@ -1,5 +1,11 @@
 """Shared pytest fixtures for Bugzilla MCP tests"""
 
+import os
+
+# Fail on camelCase MCP field reads (inputSchema, mimeType, ...) instead of only
+# warning: fastmcp 4 will drop that compatibility bridge. Must be set before fastmcp loads.
+os.environ.setdefault("FASTMCP_MCP_CAMELCASE_COMPAT", "false")
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 import bugzilla_mcp.utils as utils

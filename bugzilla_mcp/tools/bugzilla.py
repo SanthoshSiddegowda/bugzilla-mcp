@@ -7,7 +7,7 @@ import httpx
 from typing import Annotated, Any
 from pydantic import Field
 from fastmcp.utilities.types import Image
-from mcp.types import TextContent
+from mcp.types import TextContent, ToolAnnotations
 from fastmcp.exceptions import ToolError, PromptError
 import bugzilla_mcp.utils as utils
 from bugzilla_mcp.utils.bugzilla import classify_bug
@@ -665,10 +665,10 @@ def register_tools(mcp, local_files: bool = False) -> None:
     """
     disabled = {n.strip() for n in os.environ.get(DISABLED_TOOLS_ENV, "").split(",") if n.strip()}
     groups = [
-        (READ_ONLY_TOOLS, {"readOnlyHint": True}),
-        (ADDITIVE_TOOLS, {"readOnlyHint": False, "destructiveHint": False}),
-        (LOCAL_ONLY_TOOLS if local_files else [], {"readOnlyHint": False, "destructiveHint": False}),
-        (DESTRUCTIVE_TOOLS, {"readOnlyHint": False, "destructiveHint": True}),
+        (READ_ONLY_TOOLS, ToolAnnotations(read_only_hint=True)),
+        (ADDITIVE_TOOLS, ToolAnnotations(read_only_hint=False, destructive_hint=False)),
+        (LOCAL_ONLY_TOOLS if local_files else [], ToolAnnotations(read_only_hint=False, destructive_hint=False)),
+        (DESTRUCTIVE_TOOLS, ToolAnnotations(read_only_hint=False, destructive_hint=True)),
     ]
     for tools, annotations in groups:
         for fn in tools:
