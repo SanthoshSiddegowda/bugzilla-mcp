@@ -1,0 +1,62 @@
+{
+  "manifest_version": "0.4",
+  "name": "bugzilla-mcp",
+  "display_name": "Bugzilla",
+  "version": "0.6.0",
+  "description": "Search, read, triage and update Bugzilla bugs. Read-only by default.",
+  "long_description": "Connects Claude to any Bugzilla 5.0+ instance with your API key. Read bugs, comments, history and attachments (screenshots come through as images), search with quicksearch or structured filters, and triage batches of bugs. Tools that change Bugzilla (update, comment, file bugs, attach) stay off until you untick Read-only. Your API key stays on your machine.",
+  "author": {
+    "name": "Santhosh Siddegowda",
+    "url": "https://github.com/SanthoshSiddegowda"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SanthoshSiddegowda/bugzilla-mcp"
+  },
+  "homepage": "https://github.com/SanthoshSiddegowda/bugzilla-mcp",
+  "support": "https://github.com/SanthoshSiddegowda/bugzilla-mcp/issues",
+  "icon": "icon.png",
+  "license": "Apache-2.0",
+  "keywords": ["bugzilla", "bug-tracking", "triage", "issues"],
+  "server": {
+    "type": "uv",
+    "entry_point": "bugzilla_mcp/cli.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "bugzilla-mcp"],
+      "env": {
+        "BUGZILLA_URL": "${user_config.bugzilla_url}",
+        "BUGZILLA_API_KEY": "${user_config.api_key}",
+        "BUGZILLA_READ_ONLY": "${user_config.read_only}"
+      }
+    }
+  },
+  "user_config": {
+    "bugzilla_url": {
+      "type": "string",
+      "title": "Bugzilla URL",
+      "description": "Base URL of your Bugzilla, e.g. https://bugzilla.example.com",
+      "required": true
+    },
+    "api_key": {
+      "type": "string",
+      "title": "API key",
+      "description": "Create one in Bugzilla under Preferences → API Keys (userprefs.cgi?tab=apikey)",
+      "sensitive": true,
+      "required": true
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only (recommended)",
+      "description": "Untick to let Claude update bugs, add comments, file bugs and attach files",
+      "default": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.12"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+# Only the package, pyproject.toml, uv.lock, manifest, icon, README and LICENSE go in the bundle
+.venv/
+.git/
+.github/
+.pytest_cache/
+dist/
+docs/
+tests/
+**/__pycache__/
+.env
+.env.example
+*.mcpb
+CLAUDE.md
+server.py
+server_local.py
+coverage.xml

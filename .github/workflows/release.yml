@@ -1,0 +1,104 @@
+name: Release
+
+# Publishing a GitHub release (tag vX.Y.Z) publishes the package to PyPI and
+# attaches the Claude Desktop extension (.mcpb) to the release.
+# Run manually to try a build against TestPyPI first.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Where to publish"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check versions match
+        run: |
+          PY_VERSION=$(uv version --short)
+          MCPB_VERSION=$(jq -r .version manifest.json)
+          echo "pyproject: $PY_VERSION, manifest.json: $MCPB_VERSION"
+          test "$PY_VERSION" = "$MCPB_VERSION"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag: ${{ github.event.release.tag_name }}"
+            test "v$PY_VERSION" = "${{ github.event.release.tag_name }}"
+          fi
+
+      - name: Test
+        run: |
+          uv sync --all-extras
+          uv run pytest tests
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - name: Smoke-test the wheel
+        run: uvx --from dist/*.whl bugzilla-mcp --version
+
+      - name: Build Claude Desktop extension
+        run: |
+          npx -y @anthropic-ai/mcpb@2 validate manifest.json
+          npx -y @anthropic-ai/mcpb@2 pack . "dist/bugzilla-mcp-$(uv version --short).mcpb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    # Configure the matching trusted publisher on pypi.org / test.pypi.org
+    environment: ${{ github.event_name == 'release' && 'pypi' || inputs.repository }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Publish to PyPI
+        if: github.event_name == 'release' || inputs.repository == 'pypi'
+        run: uv publish --trusted-publishing always dist/*.whl dist/*.tar.gz
+
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+        run: uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/ dist/*.whl dist/*.tar.gz
+
+  attach-extension:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Attach .mcpb to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp dist/*.mcpb bugzilla-mcp.mcpb
+          gh release upload "${{ github.event.release.tag_name }}" dist/*.mcpb bugzilla-mcp.mcpb --repo "${{ github.repository }}"
