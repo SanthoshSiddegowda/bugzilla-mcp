@@ -15,7 +15,9 @@ class ValidateHeaders(Middleware):
     and closes it once the request is handled.
     """
 
-    async def on_message(self, middleware_context: MiddlewareContext, call_next):
+    # on_request, not on_message: since fastmcp 4, on_message also sees notifications
+    # (initialized, cancelled, progress), which never need a Bugzilla client.
+    async def on_request(self, middleware_context: MiddlewareContext, call_next):
         headers = get_http_headers()
 
         # During inspection or when headers are not available, skip validation

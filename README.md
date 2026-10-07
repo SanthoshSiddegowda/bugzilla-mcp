@@ -4,9 +4,71 @@
 
 A Model Context Protocol (MCP) server that enables secure interaction with Bugzilla instances. This server facilitates communication between AI applications and Bugzilla bug tracking systems through a controlled interface.
 
-## Quick Start
+## Install
 
-**Hosted Server**: Use the production server at `https://bugzilla.fastmcp.app/mcp` - no local setup required! Just add it to your MCP client configuration with your Bugzilla API key and instance URL.
+The server runs on your machine, so your Bugzilla API key never leaves it. It starts **read-only**: tools that change Bugzilla stay off until you turn them on.
+
+### Claude Desktop: one click
+
+1. Download **[bugzilla-mcp.mcpb](https://github.com/SanthoshSiddegowda/bugzilla-mcp/releases/latest/download/bugzilla-mcp.mcpb)** from the latest release.
+2. Double-click it (or open **Settings → Extensions** and install it there).
+3. Enter your Bugzilla URL and [API key](#api-key). Leave **Read-only** ticked unless you want Claude to update bugs.
+
+No Python or terminal needed. The API key is stored as a secret by Claude Desktop.
+
+### Claude Code
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) once, then:
+
+```bash
+claude mcp add bugzilla --scope user \
+  -e BUGZILLA_URL=https://bugzilla.example.com \
+  -e BUGZILLA_API_KEY=your-api-key \
+  -- uvx bugzilla-mcp
+```
+
+Add `--allow-writes` after `bugzilla-mcp` to enable write tools. Check it with `claude mcp list`.
+
+### Cursor, VS Code and other MCP clients
+
+```json
+{
+  "mcpServers": {
+    "bugzilla": {
+      "command": "uvx",
+      "args": ["bugzilla-mcp"],
+      "env": {
+        "BUGZILLA_URL": "https://bugzilla.example.com",
+        "BUGZILLA_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+If the client can't find `uvx` (desktop apps don't always load your shell's `PATH`), use the full path from `which uvx`.
+
+### pip
+
+```bash
+pip install bugzilla-mcp
+bugzilla-mcp --help
+```
+
+### Options
+
+| Setting | How | Default |
+|---|---|---|
+| Bugzilla URL | `BUGZILLA_URL` | required |
+| API key | `BUGZILLA_API_KEY` (environment or `.env` only, never a flag) | required |
+| Write tools | `--allow-writes` or `BUGZILLA_READ_ONLY=false` | off |
+| Remove tools | `BUGZILLA_DISABLED_TOOLS=update_bug,create_bug` | none |
+| Run as an HTTP server for several users | `bugzilla-mcp --transport http --host 0.0.0.0 --port 8000` (credentials then come from each request's headers) | stdio |
+
+### API key
+
+Create one in Bugzilla under **Preferences → API Keys** (`https://your-bugzilla/userprefs.cgi?tab=apikey`). The key has the same permissions as your account, so a dedicated account with limited access is safest.
+
 
 ## Features
 
@@ -40,7 +102,7 @@ This MCP server provides a comprehensive interface for AI agents to interact wit
   - Fetch detailed user profiles (`get_user`) and search user databases (`search_users`).
   - Traverse dependency/blocker trees (`bug_dependencies`) and resolve duplicate bug chains (`duplicate_chain`).
 
-## Configuration
+## HTTP Server Headers
 
 The server requires HTTP headers for authentication. Configure your MCP client with the following headers:
 
@@ -57,7 +119,9 @@ Self-hosting? `BUGZILLA_READ_ONLY` sets the server's default, and `BUGZILLA_DISA
 >
 > **Hosted server**: when you use `https://bugzilla.fastmcp.app/mcp`, your API key passes through that server on its way to your Bugzilla instance. If you don't want a third party to handle your key, [run the server locally](#running-the-server-locally).
 
-## Usage
+## Try the Hosted Server
+
+Want to try it before installing? A hosted server runs at `https://bugzilla.fastmcp.app/mcp`. Your API key passes through that server on its way to your Bugzilla, so for real use, [install it locally](#install).
 
 ### With Claude Code
 
@@ -155,7 +219,7 @@ Add this to your `mcp.json`:
 
 > **Note**: For local development, use `http://127.0.0.1:8000/mcp` instead.
 
-### Running the Server Locally
+## Run from a Source Checkout
 
 For local development, testing, or self-hosting, you can run the Bugzilla MCP server in two modes: **Local stdio Server** (recommended for personal use/single user) or **Local HTTP Server** (best for multi-user or remote setups).
 

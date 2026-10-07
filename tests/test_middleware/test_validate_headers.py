@@ -42,7 +42,7 @@ class TestValidateHeadersMiddleware:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0] is not None
         assert seen[0].base_url == "https://bugzilla.example.com"
@@ -56,7 +56,7 @@ class TestValidateHeadersMiddleware:
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             with pytest.raises(ValidationError) as exc_info:
-                await middleware.on_message(mock_context, mock_call_next)
+                await middleware.on_request(mock_context, mock_call_next)
         
         assert "api_key" in str(exc_info.value)
 
@@ -68,7 +68,7 @@ class TestValidateHeadersMiddleware:
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
             with pytest.raises(ValidationError) as exc_info:
-                await middleware.on_message(mock_context, mock_call_next)
+                await middleware.on_request(mock_context, mock_call_next)
         
         assert "bugzilla_url" in str(exc_info.value)
 
@@ -80,7 +80,7 @@ class TestValidateHeadersMiddleware:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0].base_url == "https://bugzilla.example.com"
 
@@ -92,7 +92,7 @@ class TestValidateHeadersMiddleware:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0].base_url == "http://bugzilla.example.com"
 
@@ -104,14 +104,14 @@ class TestValidateHeadersMiddleware:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0].base_url == "https://bugzilla.example.com"
 
     async def test_empty_headers_creates_dummy_client(self, middleware, mock_context, mock_call_next, seen):
         """Test that empty headers (inspection mode) creates a dummy client"""
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value={}):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0] is not None
         assert seen[0].base_url == "https://bugzilla.example.com"
@@ -120,7 +120,7 @@ class TestValidateHeadersMiddleware:
     async def test_none_headers_creates_dummy_client(self, middleware, mock_context, mock_call_next, seen):
         """Test that None headers (inspection mode) creates a dummy client"""
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=None):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0] is not None
         assert seen[0].base_url == "https://bugzilla.example.com"
@@ -133,7 +133,7 @@ class TestValidateHeadersMiddleware:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            result = await middleware.on_message(mock_context, mock_call_next)
+            result = await middleware.on_request(mock_context, mock_call_next)
         
         mock_call_next.assert_called_once_with(mock_context)
         assert result == "success"
@@ -150,7 +150,7 @@ class TestValidateHeadersMiddleware:
         mock_call_next = MagicMock(side_effect=lambda ctx: async_result())
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            result = await middleware.on_message(mock_context, mock_call_next)
+            result = await middleware.on_request(mock_context, mock_call_next)
         
         assert result == expected_result
 
@@ -185,7 +185,7 @@ class TestValidateHeadersUrlEdgeCases:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         assert seen[0].base_url == "https://bugzilla.example.com/bugzilla"
         assert seen[0].api_url == "https://bugzilla.example.com/bugzilla/rest"
@@ -198,7 +198,7 @@ class TestValidateHeadersUrlEdgeCases:
         }
         
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await middleware.on_message(mock_context, mock_call_next)
+            await middleware.on_request(mock_context, mock_call_next)
         
         # Should have https:// added
         assert seen[0].base_url.startswith("https://")
@@ -216,7 +216,7 @@ class TestValidateHeadersRequestIsolation:
             return "ok"
 
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", return_value=headers):
-            await ValidateHeaders().on_message(MagicMock(), call_next)
+            await ValidateHeaders().on_request(MagicMock(), call_next)
 
         assert utils.current_bz.get() is None
         assert seen[0].client.is_closed
@@ -243,9 +243,18 @@ class TestValidateHeadersRequestIsolation:
         ]
         middleware = ValidateHeaders()
         with patch("bugzilla_mcp.middleware.validate_headers.get_http_headers", side_effect=headers):
-            task_a = asyncio.create_task(middleware.on_message(MagicMock(), call_next_a))
+            task_a = asyncio.create_task(middleware.on_request(MagicMock(), call_next_a))
             await a_started.wait()
-            await middleware.on_message(MagicMock(), call_next_b)
+            await middleware.on_request(MagicMock(), call_next_b)
             await task_a
 
         assert keys == {"a": "key-a", "b": "key-b"}
+
+
+class TestValidateHeadersScope:
+    def test_notifications_do_not_create_a_client(self):
+        """fastmcp 4 routes notifications through on_message; only requests need a client"""
+        from fastmcp.server.middleware import Middleware
+        assert ValidateHeaders.on_message is Middleware.on_message
+        assert ValidateHeaders.on_notification is Middleware.on_notification
+        assert ValidateHeaders.on_request is not Middleware.on_request

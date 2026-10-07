@@ -140,9 +140,9 @@ class TestFlexibleParameters:
     async def test_parameters_have_descriptions(self):
         async with Client(_server(read_only=False)) as c:
             tools = {t.name: t for t in await c.list_tools()}
-        props = tools["bugs_advanced_search"].inputSchema["properties"]
+        props = tools["bugs_advanced_search"].input_schema["properties"]
         assert "NEW" in props["status"]["description"]
-        assert "dry_run" in tools["update_bug"].inputSchema["properties"]
+        assert "dry_run" in tools["update_bug"].input_schema["properties"]
 
 
 class TestUpdateBugDryRun:

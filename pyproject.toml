@@ -1,27 +1,38 @@
 [project]
 name = "bugzilla-mcp"
-version = "0.5.0"
-description = "A Model Context Protocol (MCP) server for interacting with Bugzilla bug tracking systems"
+version = "0.6.0"
+description = "MCP server for Bugzilla: search, read, triage and update bugs from AI assistants. Read-only by default."
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = ["mcp", "bugzilla", "bug-tracking", "model-context-protocol", "fastmcp"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3.14",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
     "Topic :: Software Development :: Bug Tracking",
 ]
 
 dependencies = [
-    "fastmcp==2.12.5",
+    "fastmcp>=4.0.11,<5",
     "python-dotenv",
     "httpx",
 ]
+
+[project.scripts]
+bugzilla-mcp = "bugzilla_mcp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/SanthoshSiddegowda/bugzilla-mcp"
+Documentation = "https://github.com/SanthoshSiddegowda/bugzilla-mcp#readme"
+Issues = "https://github.com/SanthoshSiddegowda/bugzilla-mcp/issues"
+Changelog = "https://github.com/SanthoshSiddegowda/bugzilla-mcp/releases"
 
 [project.optional-dependencies]
 test = [
@@ -39,3 +50,12 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 python_classes = ["Test*"]
 addopts = "-v --tb=short"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "bugzilla_mcp"
+# The package lives at the repo root, not under src/
+module-root = ""

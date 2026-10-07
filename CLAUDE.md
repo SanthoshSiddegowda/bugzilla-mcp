@@ -21,6 +21,12 @@ Starts the FastMCP HTTP server locally:
 uv run python server.py
 ```
 
+### Package, CLI and Releases
+- `bugzilla_mcp/cli.py` is the single place that builds servers: `build_local_server()` (stdio, single user, disk tools allowed) and `build_http_server()` (headers per request, never touches disk). `server.py` (FastMCP Cloud loads `server.py:mcp`) and `server_local.py` are thin wrappers around them.
+- `bugzilla-mcp` console script → `cli.main()`. Build with `uv build` (backend: `uv_build`).
+- `manifest.json` + `.mcpbignore` + `icon.png` make the Claude Desktop extension: `npx @anthropic-ai/mcpb pack`. Keep `manifest.json` `version` equal to `pyproject.toml` (a test checks it).
+- Publishing a GitHub release `vX.Y.Z` runs `.github/workflows/release.yml`: tests, PyPI upload (trusted publishing), `.mcpb` attached to the release.
+
 ### Local Development Server (stdio)
 Reads credentials from environment variables instead of HTTP headers:
 ```bash
