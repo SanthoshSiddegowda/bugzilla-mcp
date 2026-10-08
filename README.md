@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/bugzilla-mcp)](https://pypi.org/project/bugzilla-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/bugzilla-mcp)](https://pypi.org/project/bugzilla-mcp/)
-[![License](https://img.shields.io/pypi/l/bugzilla-mcp)](LICENSE)
+[![License](https://img.shields.io/pypi/l/bugzilla-mcp)](https://github.com/SanthoshSiddegowda/bugzilla-mcp/blob/main/LICENSE)
 [![Tests](https://github.com/SanthoshSiddegowda/bugzilla-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/SanthoshSiddegowda/bugzilla-mcp/actions/workflows/tests.yml)
 
 A Model Context Protocol (MCP) server that enables secure interaction with Bugzilla instances. This server facilitates communication between AI applications and Bugzilla bug tracking systems through a controlled interface.
