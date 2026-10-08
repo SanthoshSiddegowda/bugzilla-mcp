@@ -1,7 +1,7 @@
 ---
 seo:
   title: Bugzilla MCP Server
-  description: A Model Context Protocol server for secure interaction with Bugzilla bug tracking systems. Connect AI applications to Bugzilla with ease.
+  description: An MCP server that lets Claude and other AI assistants search, read, triage and update Bugzilla bugs. Runs on your machine, read-only by default.
 ---
 
 ::u-page-hero
@@ -9,17 +9,17 @@ seo:
 Bugzilla MCP Server
 
 #description
-A secure Model Context Protocol (MCP) server that enables AI applications to interact with Bugzilla bug tracking systems through a controlled, authenticated interface.
+Let Claude and other AI assistants search, read, triage and update your Bugzilla bugs. Runs on your machine, read-only by default. Install with one click in Claude Desktop, or `uvx bugzilla-mcp` anywhere else.
 
 #links
   :::u-button
   ---
   color: neutral
   size: xl
-  to: /getting-started/introduction
+  to: /getting-started/installation
   trailing-icon: i-lucide-arrow-right
   ---
-  Get started
+  Install
   :::
 
   :::u-button
@@ -27,7 +27,7 @@ A secure Model Context Protocol (MCP) server that enables AI applications to int
   color: neutral
   icon: simple-icons-github
   size: xl
-  to: https://github.com/your-org/bugzilla-mcp
+  to: https://github.com/SanthoshSiddegowda/bugzilla-mcp
   variant: outline
   ---
   View on GitHub
@@ -91,18 +91,18 @@ Powerful features for bug tracking
   [Secure Access]{.text-primary}
   
   #description
-  API key-based authentication through HTTP headers. Follow security best practices with minimal permissions. Never expose credentials in code.
+  Read-only by default, a dry run before bulk updates, and approval hints on every tool. Your API key stays in Claude Desktop's secure storage or your environment.
   :::
 
   :::u-page-feature
   ---
-  icon: i-lucide-cloud
+  icon: i-lucide-laptop
   ---
   #title
-  [Hosted Server]{.text-primary}
+  [Runs Locally]{.text-primary}
   
   #description
-  Use the production server at `https://bugzilla.fastmcp.app/mcp` with no local setup required. Or run locally for development and testing.
+  One click in Claude Desktop, or `uvx bugzilla-mcp` everywhere else. Your API key never leaves your machine. A hosted server is available for trying it out.
   :::
 
   :::u-page-feature
