@@ -98,9 +98,77 @@ Create one in Bugzilla under **Preferences → API Keys** (`https://your-bugzill
 
 Every tool carries MCP hints (read-only / destructive), so clients can run reads without asking and confirm before changes.
 
-## Try the hosted server
+## Hosted server (FastMCP Cloud)
 
-To try it without installing anything, point your client at `https://bugzilla.fastmcp.app/mcp` and send `api_key` and `bugzilla_url` as headers ([examples](https://bugzilla-mcp.vercel.app/getting-started/configuration#hosted-server)). Your API key passes through that server on its way to your Bugzilla, so for real use, install locally.
+Nothing to install: connect to **`https://bugzilla.fastmcp.app/mcp`**, hosted on FastMCP Cloud, and send your credentials as headers.
+
+| Header | Required | Value |
+|---|---|---|
+| `api_key` | yes | Your Bugzilla API key |
+| `bugzilla_url` | yes | Your Bugzilla's base URL (5.0+) |
+| `read_only` | no | `false` to enable write tools (default `true`) |
+
+> Your API key passes through the hosted server on its way to your Bugzilla. It's great for trying things out; for day-to-day use, [install locally](#install).
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http bugzilla https://bugzilla.fastmcp.app/mcp --scope user \
+  --header "api_key: your-api-key" \
+  --header "bugzilla_url: https://bugzilla.example.com"
+```
+
+**Claude Desktop** (via [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), needs Node.js)
+
+```json
+{
+  "mcpServers": {
+    "bugzilla": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote", "https://bugzilla.fastmcp.app/mcp",
+        "--header", "api_key:your-api-key",
+        "--header", "bugzilla_url:https://bugzilla.example.com"
+      ]
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "bugzilla": {
+      "url": "https://bugzilla.fastmcp.app/mcp",
+      "headers": {
+        "api_key": "your-api-key",
+        "bugzilla_url": "https://bugzilla.example.com"
+      }
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`)
+
+```json
+{
+  "servers": {
+    "bugzilla": {
+      "type": "http",
+      "url": "https://bugzilla.fastmcp.app/mcp",
+      "headers": {
+        "api_key": "your-api-key",
+        "bugzilla_url": "https://bugzilla.example.com"
+      }
+    }
+  }
+}
+```
+
+Add `read_only: false` to the headers (`"--header", "read_only:false"` for `mcp-remote`) to enable write tools. More: [Hosted server](https://bugzilla-mcp.vercel.app/getting-started/configuration#hosted-server).
 
 ## Security
 

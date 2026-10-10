@@ -102,7 +102,18 @@ Powerful features for bug tracking
   [Runs Locally]{.text-primary}
   
   #description
-  One click in Claude Desktop, or `uvx bugzilla-mcp` everywhere else. Your API key never leaves your machine. A hosted server is available for trying it out.
+  One click in Claude Desktop, or `uvx bugzilla-mcp` everywhere else. Your API key never leaves your machine.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-cloud
+  ---
+  #title
+  [Hosted Server]{.text-primary}
+  
+  #description
+  Nothing to install: connect to `https://bugzilla.fastmcp.app/mcp` on FastMCP Cloud with your API key and Bugzilla URL as headers.
   :::
 
   :::u-page-feature
