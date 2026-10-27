@@ -13,6 +13,19 @@ An MCP server that lets Claude and other AI assistants search, read, triage and 
 
 📖 **Docs:** [bugzilla-mcp.vercel.app](https://bugzilla-mcp.vercel.app/getting-started/installation)
 
+## Requirements
+
+Start local; use the [hosted server](#hosted-server-fastmcp-cloud) to try things out without installing anything.
+
+| | Local (recommended) | Hosted |
+|---|---|---|
+| Bugzilla | 5.0+ with the REST API enabled | Same, reachable from the internet |
+| API key | [From your Bugzilla](#api-key) | Same |
+| On your machine | [uv](https://docs.astral.sh/uv/getting-started/installation/) or [pipx](#pipx) (nothing for Claude Desktop's one-click install) | Nothing |
+| MCP client | Any client that runs stdio servers | Any client with HTTP transport and custom headers |
+| Your API key | Stays on your machine | Passes through `bugzilla.fastmcp.app` |
+| Attachment downloads | Yes | No |
+
 ## Install
 
 ### Claude Desktop: one click
@@ -57,12 +70,24 @@ If the client can't find `uvx` (desktop apps don't always load your shell's `PAT
 
 ### pipx
 
+[pipx](https://pipx.pypa.io/) installs `bugzilla-mcp` into its own environment and puts the command on your `PATH`:
+
 ```bash
+brew install pipx && pipx ensurepath   # macOS; see pipx docs for Linux/Windows
 pipx install bugzilla-mcp
 bugzilla-mcp --help
 ```
 
-Then use `bugzilla-mcp` as the client command instead of `uvx bugzilla-mcp`. Upgrade with `pipx upgrade bugzilla-mcp`.
+Then use `bugzilla-mcp` as the client command instead of `uvx bugzilla-mcp`:
+
+```bash
+claude mcp add bugzilla --scope user \
+  -e BUGZILLA_URL=https://bugzilla.example.com \
+  -e BUGZILLA_API_KEY=your-api-key \
+  -- bugzilla-mcp
+```
+
+If a desktop app can't find it, use the full path from `which bugzilla-mcp` (usually `~/.local/bin/bugzilla-mcp`). Upgrade with `pipx upgrade bugzilla-mcp`.
 
 Needs Python 3.12+. If pipx reports *"No matching distribution found"*, it is using an older Python (macOS's `python3` is 3.9): run `pipx install --python python3.12 bugzilla-mcp`.
 
