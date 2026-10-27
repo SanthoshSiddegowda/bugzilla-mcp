@@ -55,16 +55,16 @@ Add `--allow-writes` after `bugzilla-mcp` to enable write tools. Check it with `
 
 If the client can't find `uvx` (desktop apps don't always load your shell's `PATH`), use the full path from `which uvx`.
 
-### pip
-
-Requires **Python 3.12+**.
+### pipx
 
 ```bash
-pip install bugzilla-mcp
+pipx install bugzilla-mcp
 bugzilla-mcp --help
 ```
 
-On macOS, `pip`/`python3` is often Apple's Python 3.9, and pip then reports *"No matching distribution found"*. Use `uv tool install bugzilla-mcp` (or `uvx bugzilla-mcp`), which picks a suitable Python for you.
+Then use `bugzilla-mcp` as the client command instead of `uvx bugzilla-mcp`. Upgrade with `pipx upgrade bugzilla-mcp`.
+
+Needs Python 3.12+. If pipx reports *"No matching distribution found"*, it is using an older Python (macOS's `python3` is 3.9): run `pipx install --python python3.12 bugzilla-mcp`.
 
 ### Options
 
