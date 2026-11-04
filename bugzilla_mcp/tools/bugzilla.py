@@ -172,7 +172,7 @@ async def bug_url(bug_id: int) -> str:
 async def download_attachments(bug_id: int, dest_dir: str | None = None) -> list[dict[str, Any]]:
     """Download all attachments for a specific bug to a temporary directory.
 
-    If dest_dir is not provided, a local 'tmp' directory in the project root is used.
+    If dest_dir is not provided, ~/.cache/bugzilla-mcp/attachments is used (`~` is expanded).
     Local server only: on the hosted server use bug_attachments / get_attachment.
     """
     bz = _client()
@@ -185,7 +185,7 @@ async def download_attachments(bug_id: int, dest_dir: str | None = None) -> list
 async def download_attachment(attachment_id: int, dest_dir: str | None = None) -> dict[str, Any]:
     """Download a specific attachment by its ID.
 
-    If dest_dir is not provided, a local 'tmp' directory in the project root is used.
+    If dest_dir is not provided, ~/.cache/bugzilla-mcp/attachments is used (`~` is expanded).
     Local server only: on the hosted server use bug_attachments / get_attachment.
     """
     bz = _client()

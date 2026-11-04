@@ -8,6 +8,27 @@ import httpx
 from bugzilla_mcp.utils import Bugzilla
 
 
+class TestSaveAttachmentDestination:
+    """Where _save_attachment writes when dest_dir is omitted or uses ~"""
+
+    ATT = {"id": 7, "file_name": "log.txt", "data": base64.b64encode(b"x").decode()}
+
+    def test_default_dir_is_user_cache_not_package(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        path = Bugzilla._save_attachment(self.ATT, None)
+
+        assert path == os.path.join(str(tmp_path), ".cache", "bugzilla-mcp", "attachments", "7_log.txt")
+        assert open(path, "rb").read() == b"x"
+
+    def test_tilde_in_dest_dir_is_expanded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        path = Bugzilla._save_attachment(self.ATT, "~/bugs/42")
+
+        assert path == os.path.join(str(tmp_path), "bugs", "42", "7_log.txt")
+        assert not (tmp_path / "~").exists()
+
+
 class TestBugzillaDownloadAttachments:
     """Tests for download_attachments method"""
 
