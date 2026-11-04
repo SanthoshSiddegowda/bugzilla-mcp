@@ -1,6 +1,6 @@
 [project]
 name = "bugzilla-mcp"
-version = "0.6.0"
+version = "0.6.1"
 description = "MCP server for Bugzilla: search, read, triage and update bugs from AI assistants. Read-only by default."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "bugzilla-mcp",
   "display_name": "Bugzilla",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Search, read, triage and update Bugzilla bugs. Read-only by default.",
   "long_description": "Connects Claude to any Bugzilla 5.0+ instance with your API key. Read bugs, comments, history and attachments (screenshots come through as images), search with quicksearch or structured filters, and triage batches of bugs. Tools that change Bugzilla (update, comment, file bugs, attach) stay off until you untick Read-only. Your API key stays on your machine.",
   "author": {
