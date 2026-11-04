@@ -99,6 +99,7 @@ Needs Python 3.12+. If pipx reports *"No matching distribution found"*, it is us
 | API key | `BUGZILLA_API_KEY` (environment or `.env` only, never a flag) | required |
 | Write tools | `--allow-writes` or `BUGZILLA_READ_ONLY=false` | off |
 | Remove tools | `BUGZILLA_DISABLED_TOOLS=update_bug,create_bug` | none |
+| Request timeout (seconds) | `BUGZILLA_TIMEOUT` | 30 |
 | HTTP server for several users | `bugzilla-mcp --transport http --host 0.0.0.0 --port 8000` | stdio |
 
 See [Configuration](https://bugzilla-mcp.vercel.app/getting-started/configuration) for every option.

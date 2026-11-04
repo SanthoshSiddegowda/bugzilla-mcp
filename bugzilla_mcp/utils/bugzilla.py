@@ -16,6 +16,13 @@ API_KEY_HEADER = "X-BUGZILLA-API-KEY"
 # Keyed by URL only (no secrets). Re-probed after a process restart.
 _header_auth_support: dict[str, bool] = {}
 
+# httpx defaults to 5 s, too short for large attachments or slow instances
+DEFAULT_TIMEOUT = 30.0
+
+# Where attachments go when the caller gives no dest_dir. Not the package folder:
+# installed from PyPI (uvx, pipx) that is inside a tool cache nobody looks in.
+DEFAULT_ATTACHMENT_DIR = os.path.join("~", ".cache", "bugzilla-mcp", "attachments")
+
 CLOSED_STATUSES = {"RESOLVED", "VERIFIED", "CLOSED"}
 NOT_A_BUG_RESOLUTIONS = {"INVALID", "WONTFIX", "DUPLICATE", "WORKSFORME", "NOTABUG"}
 OPEN_STATUSES = {"NEW", "ASSIGNED", "REOPENED", "UNCONFIRMED"}
@@ -48,7 +55,8 @@ class Bugzilla:
         self.api_url: str = url + "/rest"
         self.base_url: str = url
         self.api_key: str = api_key
-        self.client: httpx.AsyncClient = httpx.AsyncClient()
+        timeout = float(os.environ.get("BUGZILLA_TIMEOUT") or DEFAULT_TIMEOUT)
+        self.client: httpx.AsyncClient = httpx.AsyncClient(timeout=timeout)
 
     async def supports_header_auth(self) -> bool:
         """Check once per Bugzilla URL whether it reads the API key header.
@@ -59,16 +67,24 @@ class Bugzilla:
         answers error 306 (invalid API key), one that ignores it doesn't.
         """
         if self.base_url not in _header_auth_support:
-            try:
-                r = await self.client.get(
-                    f"{self.api_url}/bug/1",
-                    params={"include_fields": "id"},
-                    headers={API_KEY_HEADER: "invalid-probe-key"},
-                )
-                supported = r.json().get("code") == 306
-            except (httpx.HTTPError, ValueError):
-                # Transient failure: use the query string this time, probe again next time
-                return False
+            for attempt in (1, 2):
+                try:
+                    r = await self.client.get(
+                        f"{self.api_url}/bug/1",
+                        params={"include_fields": "id"},
+                        headers={API_KEY_HEADER: "invalid-probe-key"},
+                    )
+                    supported = r.json().get("code") == 306
+                    break
+                except httpx.HTTPError:
+                    # Network error: retry once, then fail. Falling back to the query
+                    # string here would put the key in the URL of a request that most
+                    # likely fails the same way, and in any proxy log on its path.
+                    if attempt == 2:
+                        raise
+                except ValueError:
+                    # Answered, but not with JSON: use the query string this time, probe again next time
+                    return False
 
             _header_auth_support[self.base_url] = supported
             if not supported:
@@ -164,12 +180,9 @@ class Bugzilla:
 
     @staticmethod
     def _save_attachment(att: dict[str, Any], dest_dir: str | None) -> str:
-        """Decode an attachment into dest_dir (default: <project>/tmp) and return its path"""
-        if dest_dir is None:
-            project_root = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            )
-            dest_dir = os.path.join(project_root, "tmp")
+        """Decode an attachment into dest_dir (default: ~/.cache/bugzilla-mcp/attachments) and return its path"""
+        # expanduser: a model often passes "~/..." and makedirs would create a literal "~" folder
+        dest_dir = os.path.expanduser(dest_dir or DEFAULT_ATTACHMENT_DIR)
         os.makedirs(dest_dir, exist_ok=True)
 
         try:

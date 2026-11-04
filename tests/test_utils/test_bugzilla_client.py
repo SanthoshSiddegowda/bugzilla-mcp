@@ -37,6 +37,17 @@ class TestBugzillaInit:
         bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
         assert isinstance(bz.client, httpx.AsyncClient)
 
+    def test_init_default_timeout_is_30s(self, monkeypatch):
+        """httpx's own 5 s default is too short for large attachments"""
+        monkeypatch.delenv("BUGZILLA_TIMEOUT", raising=False)
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        assert bz.client.timeout.read == 30.0
+
+    def test_init_timeout_from_env(self, monkeypatch):
+        monkeypatch.setenv("BUGZILLA_TIMEOUT", "90")
+        bz = Bugzilla(url="https://bugzilla.mozilla.org", api_key="test-key")
+        assert bz.client.timeout.connect == 90.0 and bz.client.timeout.read == 90.0
+
 
 class TestBugzillaBugInfo:
     """Tests for bug_info method"""
@@ -319,8 +330,29 @@ class TestBugzillaAuth:
         httpx_mock.add_response(url=self.PROBE, status_code=401, json={"error": True, "code": 410})
         assert await Bugzilla(url=self.URL, api_key="secret").auth() == ({}, {"api_key": "secret"})
 
-    async def test_probe_failure_falls_back_without_caching(self, httpx_mock):
+    async def test_probe_network_failure_raises_instead_of_leaking_key(self, httpx_mock):
+        """A network error must not send the key in the query string: retry once, then raise"""
         httpx_mock.add_exception(httpx.ConnectError("down"), url=self.PROBE)
+        httpx_mock.add_exception(httpx.ConnectError("down"), url=self.PROBE)
+        bz = Bugzilla(url=self.URL, api_key="secret")
+
+        with pytest.raises(httpx.ConnectError):
+            await bz.auth()
+        assert len(httpx_mock.get_requests()) == 2
+        assert all("secret" not in str(r.url) for r in httpx_mock.get_requests())
+        assert self.URL not in bugzilla_module._header_auth_support
+
+    async def test_probe_retries_once_after_network_failure(self, httpx_mock):
+        httpx_mock.add_exception(httpx.ReadTimeout("slow"), url=self.PROBE)
+        httpx_mock.add_response(url=self.PROBE, json={"error": True, "code": 306})
+        bz = Bugzilla(url=self.URL, api_key="secret")
+
+        assert await bz.auth() == ({"X-BUGZILLA-API-KEY": "secret"}, {})
+        assert bugzilla_module._header_auth_support[self.URL] is True
+
+    async def test_probe_non_json_falls_back_without_caching(self, httpx_mock):
+        """An answer that isn't JSON (proxy/SSO page) keeps the old fallback, probed again next time"""
+        httpx_mock.add_response(url=self.PROBE, text="<html>login</html>")
         bz = Bugzilla(url=self.URL, api_key="secret")
 
         assert await bz.auth() == ({}, {"api_key": "secret"})
