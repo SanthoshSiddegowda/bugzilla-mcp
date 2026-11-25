@@ -50,8 +50,10 @@ class TestCreateBugTool:
             assigned_to="dev@example.com",
             keywords=["crash", "regression"],
             target_milestone="121",
+            extra_fields={"cf_after_release": "false"},
         )
         call_kwargs = set_bugzilla_client.create_bug.call_args.kwargs
+        assert call_kwargs["extra_fields"] == {"cf_after_release": "false"}
         assert call_kwargs["severity"] == "critical"
         assert call_kwargs["priority"] == "P1"
         assert call_kwargs["assigned_to"] == "dev@example.com"

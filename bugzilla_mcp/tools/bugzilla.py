@@ -276,6 +276,10 @@ async def create_bug(
     assigned_to: str | None = None,
     keywords: Annotated[str | list[str] | None, Field(description='One keyword or a list, e.g. "regression"')] = None,
     target_milestone: str | None = None,
+    extra_fields: Annotated[
+        dict[str, Any] | None,
+        Field(description='Custom or other fields, e.g. {"cf_after_release": "false"}'),
+    ] = None,
 ) -> dict[str, Any]:
     """File a new bug in Bugzilla.
 
@@ -294,6 +298,7 @@ async def create_bug(
             assigned_to=assigned_to,
             keywords=_as_list(keywords),
             target_milestone=target_milestone,
+            extra_fields=extra_fields,
         )
     except Exception as e:
         raise ToolError(f"Failed to create bug\nReason: {e}")
