@@ -345,8 +345,11 @@ class Bugzilla:
         assigned_to: str | None = None,
         keywords: list[str] | None = None,
         target_milestone: str | None = None,
+        extra_fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """File a new bug in Bugzilla via POST /rest/bug.
+
+        extra_fields: other fields to send as-is, e.g. custom fields {"cf_after_release": "false"}.
 
         Returns:
             {"id": <new_bug_id>}
@@ -366,6 +369,8 @@ class Bugzilla:
             keywords=keywords or None,
             target_milestone=target_milestone,
         )
+        if extra_fields:
+            payload.update(extra_fields)
         # Bugzilla answers 201 Created; accept 200 too for forks that differ
         return await self._request("post", "/bug", json=payload, ok=(200, 201), what="create bug")
 

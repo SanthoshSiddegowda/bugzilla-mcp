@@ -70,6 +70,12 @@ class TestCreateBug:
         assert payload["priority"] == "P1"
 
     @pytest.mark.asyncio
+    async def test_create_bug_extra_fields(self, bz: Bugzilla):
+        bz.client.post = AsyncMock(return_value=_make_response(201, {"id": 1}))
+        await bz.create_bug("P", "C", "S", "1.0", "D", extra_fields={"cf_after_release": "false"})
+        assert bz.client.post.call_args.kwargs["json"]["cf_after_release"] == "false"
+
+    @pytest.mark.asyncio
     async def test_create_bug_http_error(self, bz: Bugzilla):
         bz.client.post = AsyncMock(
             return_value=_make_response(401, {})
